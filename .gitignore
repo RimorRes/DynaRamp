@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE - PyCharm / IntelliJ IDEA
+.idea/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# pytest
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment variables
+.env
+
+# OS specific
+.DS_Store
+Thumbs.db
