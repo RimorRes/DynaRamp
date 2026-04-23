@@ -67,7 +67,7 @@ class Basis:
         :return: The calculated global transformation matrix as a (3, 3) ndarray.
         :rtype: np.ndarray
         """
-        if self is Basis.__global_inst:
+        if self._parent is None:
             return self._mat
 
         parent_mat = self._parent.global_transform
@@ -115,7 +115,7 @@ class Basis:
         except AssertionError:
             raise ValueError("The given matrix is not a valid rotation matrix.")
 
-        if self is Basis.__global_inst:
+        if self._parent is None:
             raise ValueError("Cannot set the global basis.")
 
         parent_global = self._parent.global_transform
@@ -144,7 +144,7 @@ class Basis:
         :return:
         """
 
-        if self is Basis.__global_inst:
+        if self._parent is None:
             raise ValueError("Cannot rotate the global basis")
 
         rot_mat = self._rotation_matrix(angle, axis)

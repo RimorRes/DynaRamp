@@ -1,4 +1,4 @@
-from beam import EulerBernoulliBeam
+from dynaramp.beam import EulerBernoulliBeam
 
 # TODO: test first beam natural frequencies against know
 # TODO: test mode shape = +/- 2 at x=L
