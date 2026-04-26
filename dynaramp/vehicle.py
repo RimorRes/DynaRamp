@@ -8,14 +8,15 @@ class Shoe:
 
     def __init__(self, parent: RigidRocket):
         self.deactivation_dist = 0
+        self.dk = 0  # X-axis distance from center of mass
+        self.rk = 0  # Y-axis radius from centerline
 
         # Mechanical properties
         self.e_modulus = 0
         self.surf = 0
-        self.l0 = 0
+        self.l0 = 0  # Relaxed length
 
-    def strain_energy(self, length):
-        return 1/2 * self.surf * self.e_modulus / self.l0 * (length-self.l0)**2
+        self.spring_const = self.e_modulus * self.surf / self.l0
 
 
 class RigidRocket:
