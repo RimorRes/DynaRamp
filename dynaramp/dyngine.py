@@ -42,3 +42,7 @@ def newmarkbeta_integrator(m, c, k, f_func, init_state, t_stop, dt, beta=0.25, g
         yield q, q_dot, q_ddot
 
 
+def nnr_integrator(m, c, k, f_func, init_state, t_stop, dt):
+    # Newmark/Newton-Raphson integrator, for nonlinear dynamics.
+    pass
+
