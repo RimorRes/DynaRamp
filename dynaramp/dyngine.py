@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.linalg import solve
+from scipy.differentiate import jacobian
 
 def newmarkbeta_integrator(m, c, k, f_func, init_state, t_stop, dt, beta=0.25, gamma=0.5):
     # TODO: CFL number, adaptive time step size
@@ -42,7 +43,55 @@ def newmarkbeta_integrator(m, c, k, f_func, init_state, t_stop, dt, beta=0.25, g
         yield q, q_dot, q_ddot
 
 
-def nnr_integrator(m, c, k, f_func, init_state, t_stop, dt):
+def nnr_integrator(m, c, f_int_func, f_ext_func, init_state, t_stop, dt, beta=0.25, gamma=0.5, conv_err=1e-6):
     # Newmark/Newton-Raphson integrator, for nonlinear dynamics.
-    pass
+    # TODO: CFL number, adaptive time step size
+    # Initializing problem
+    q, q_dot = init_state  # initial state vector, generalized coordinates
+    # Evaluate initial acceleration using the equation of motion, TODO: F_EXT CHECK ARGUMENTS
+    q_ddot = m.inv @ (f_ext_func(q, q_dot, 0) - f_int_func(q) - c @ q_dot)
+
+    # Main loop, time stepping
+    for t in np.arange(0, t_stop, dt):
+        qp, qp_dot, qp_ddot = q, q_dot, q_ddot  # previous state
+
+        # Nonlinear dynamics, loop step until convergence
+
+        # Explicit predictor
+        qk_ddot = q_ddot  # Constant acceleration is assumed, could be 0
+        qk_dot = qp_dot + dt * ((1 - gamma) * qp_ddot + gamma * qk_ddot)
+        qk = qp + dt * qp_dot + (dt ** 2) / 2 * ((1 - 2 * beta) * qp_ddot + 2 * beta * qk_ddot)
+
+        # Newton-Raphson corrector loop
+        conv = False
+        while not conv:
+
+            # Evaluate forces using estimated state
+            f_ext = f_ext_func(qk, qk_dot, t)  # TODO: CHECK ARGUMENTS
+            f_int = f_int_func(qk)
+            # Evaluate jacobian of internal forces
+            res = jacobian(f_int_func, qk)
+            assert res.status == 0
+            k_tangent = res.df  # Slope of internal forces, equivalent stiffness at qk
+
+            residual = f_ext - f_int - m @ qk_ddot - c @ qk_dot
+
+            m_coef = 1 / (beta * (dt ** 2))  # = delta_q_ddot / delta_q
+            c_coef = gamma / (beta * dt)  # = delta_q_dot / delta_q
+            k_hat = m_coef * m + c_coef * c + k_tangent  # Effective stiffness matrix
+            delta_q = solve(k_hat, residual)
+
+            # Update state
+            qk += delta_q
+            qk_dot += c_coef * delta_q
+            qk_ddot += m_coef * delta_q
+
+            conv = np.linalg.norm(delta_q) < conv_err
+
+        # TIME STEP END
+        q = qk
+        q_dot = qk_dot
+        q_ddot = qk_ddot
+
+        yield q, q_dot, q_ddot
 
