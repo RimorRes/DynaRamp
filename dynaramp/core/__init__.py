@@ -1,9 +1,9 @@
 """Public package API for core simulation primitives."""
 
-from .basis import Basis, normalize_vec
+from .ode import nnr_solver, newmarkbeta_solver
 
 __all__ = [
-	"Basis",
-	"normalize_vec",
+	"nnr_solver",
+	"newmarkbeta_solver",
 ]
 

@@ -1,8 +1,5 @@
 import numpy as np
-import scipy
 from scipy.optimize import fsolve
-from scipy import integrate
-from matplotlib import pyplot as plt
 
 
 class EulerBernoulliBeam:
@@ -12,11 +9,14 @@ class EulerBernoulliBeam:
 
     EI * d^4w/dx^2 = - mu * d^2w/dt^2 + q(x)
     """
-    def __init__(self, lin_mass, e_modulus, second_moment, length):
+    def __init__(self, lin_mass, e_modulus, second_moment, length, r_alpha=0.0, r_beta=0.0):
         self.mu = lin_mass # linear mass density, kg/m
         self.E = e_modulus # Elastic modulus, Pa
         self.I = second_moment # Second moment of area, m^4
         self.L = length  # Length of the beam, m
+        # Rayleigh damping coefficients
+        self.alpha = r_alpha
+        self.beta = r_beta
 
         self._roots = []  # Cache for the first roots of the characteristic equation
 
@@ -82,40 +82,12 @@ class EulerBernoulliBeam:
 
         # M-K mode orthagonality insures that M and K are diagonal
         # m_ii = int_{O}^{L} mu * phi_i^2(x) dx
-        # k_ii = w_i * m_ii
         # Moreover, int_{O}^{L} phi_i^2(x) dx = L, therefore, m_ii = mass
+        # It can be shown that: k_ii = w_i * m_ii
+        # The damping term C is computed using Rayleigh damping: C = alpha*M + beta*K
 
         m_mat = self.mu * self.L * np.eye(n_modes)
         k_mat = np.diag(m_mat @ (self.omegas[:n_modes]**2))
+        c_mat = self.alpha * m_mat + self.beta * k_mat
 
-        return m_mat, k_mat
-
-if __name__ == "__main__":
-    # Steel rectangular beam
-    b = 1e-2
-    h = 2e-2
-    A = b * h
-    rho = 7850
-    mu = rho*A  # linear mass density, kg/m
-    E = 210e9  # Elastic modulus, Pa
-    I = b * h ** 3 / 12  # Second moment of area, m^4
-    L = 1  # Length of the beam, m
-
-    Beam = EulerBernoulliBeam(mu, E, I, L)
-    ws, phis = Beam.modes(1, 4)
-    M, K = Beam.modal_matrices(4)
-
-    print("Natural frequencies (rad/s):", ws)
-    xs = np.linspace(0.0, L, 100)
-
-    print("M", M)
-    print("K", K)
-
-    for i, phi in enumerate(phis, start=1):
-        ys = phi(xs)
-        plt.plot(xs, ys, label=f"Mode {i}")
-
-    plt.xlabel("x (m)")
-    plt.ylabel("Mode shape (normalized)")
-    plt.legend()
-    plt.show()
+        return m_mat, c_mat, k_mat

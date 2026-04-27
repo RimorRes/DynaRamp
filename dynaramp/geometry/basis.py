@@ -1,13 +1,6 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
-
-
-def normalize_vec(vec: np.ndarray) -> np.ndarray:
-    """Normalize a vector"""
-    try:
-        return vec / np.linalg.norm(vec)
-    except ZeroDivisionError:
-        raise ValueError("Vector cannot be zero vector.")
+from geometry import normalize
 
 class Basis:
 
@@ -54,7 +47,7 @@ class Basis:
         except AssertionError:
             raise ValueError("Rotation axis must be a (3,) vector.")
 
-        rot_vec = angle * normalize_vec(axis)
+        rot_vec = angle * normalize(axis)
         return Rotation.from_rotvec(rot_vec).as_matrix()
 
     def _calc_global_transform(self) -> np.ndarray:
@@ -73,7 +66,7 @@ class Basis:
         parent_mat = self._parent.global_transform
         mat = parent_mat @ self._mat
         # normalize mat uint vectors
-        x, y, z = [normalize_vec(u) for u in mat.T]
+        x, y, z = [normalize(u) for u in mat.T]
         mat = np.column_stack((x, y, z))
         return mat
 
