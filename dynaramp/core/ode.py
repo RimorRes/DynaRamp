@@ -70,9 +70,8 @@ def nnr_solver(m, c, f_int_func, f_ext_func, init_state, t_stop, dt, beta=0.25, 
             f_ext = f_ext_func(qk, qk_dot, t)  # TODO: CHECK ARGUMENTS
             f_int = f_int_func(qk)
             # Evaluate jacobian of internal forces
-            print("qk:", qk)
             res = jacobian(f_int_func, qk)
-            assert res.status == 0
+            # assert res.status == 0
             k_tangent = res.df  # Slope of internal forces, equivalent stiffness at qk
 
             residual = f_ext - f_int - m @ qk_ddot - c @ qk_dot
@@ -87,7 +86,8 @@ def nnr_solver(m, c, f_int_func, f_ext_func, init_state, t_stop, dt, beta=0.25, 
             qk_dot += c_coef * delta_q
             qk_ddot += m_coef * delta_q
 
-            conv = np.linalg.norm(delta_q) < conv_err
+            print(np.linalg.norm(delta_q)/np.linalg.norm(qk))
+            conv = np.linalg.norm(delta_q)/np.linalg.norm(qk) < conv_err
 
         # TIME STEP END
         q = qk

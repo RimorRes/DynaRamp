@@ -39,34 +39,27 @@ class System:
         return f_ext
 
     def internal_forces(self, q):
-        f_ints = np.zeros_like(q)
-        if len(q.shape) == 1:
-            loops = 1
-        else:
-            loops = q.shape[1]
-        for j in range(loops):
-            pos = np.array([q[0][j], q[1][j], 0])
-            print(pos)
-            self.vehicle.update(pos, q[2][j])
+        pos = np.array([q[0], q[1], 0])
+        self.vehicle.update(pos, q[2])
 
-            f_int = np.zeros(3+self.ramp.n_modes)
-            # Modal projection of the internal forces
-            # f_s
-            f_int[0] = 0
+        f_int = np.zeros(3+self.ramp.n_modes)
+        # Modal projection of the internal forces
+        # f_s
+        f_int[0] = 0
 
-            for shoe in self.vehicle.shoes:
-                beam_disp = self.ramp.displacement(shoe.contact_loc)
-                nk = shoe.force_norm(beam_disp)
-                # f_y
-                f_int[1] += nk
-                # f_theta
-                f_int[2] += shoe.dk * nk
-                # f_mode_amps
-                for i in range(self.ramp.n_modes):
-                    f_int[3+i] += - shoe.dk * nk * self.ramp.modal_shapes[i](shoe.contact_loc)
-                f_int[3:] += self.ramp.K @ q[3:]
-            f_ints.append(f_int)
-        return f_ints
+        for shoe in self.vehicle.shoes:
+            beam_disp = self.ramp.displacement(shoe.contact_loc)
+            nk = shoe.force_norm(beam_disp)
+            # f_y
+            f_int[1] += nk
+            # f_theta
+            f_int[2] += shoe.dk * nk
+            # f_mode_amps
+            for i in range(self.ramp.n_modes):
+                f_int[3+i] += - shoe.dk * nk * self.ramp.modal_shapes[i](shoe.contact_loc)
+            f_int[3:] += self.ramp.K @ q[3:]
+
+        return f_int
 
 
 if __name__ == "__main__":
@@ -102,13 +95,15 @@ if __name__ == "__main__":
     q0[:3] = [5, -(r+0.1), 0]
     q_dot0 = np.zeros(3+Rail.n_modes)
 
+    f_wrap = lambda qs: np.apply_along_axis(Sys.internal_forces, axis=0, arr=qs)
+
     for vals in nnr_solver(
         m=Sys.M,
         c=Sys.C,
-        f_int_func=Sys.internal_forces,
+        f_int_func=f_wrap,
         f_ext_func=Sys.external_forces,
         init_state=(q0, q_dot0),
         t_stop=1,
-        dt=0.01,
+        dt=0.00001,
     ):
-        print(vals)
+        print("Step:", vals[0][:2])
