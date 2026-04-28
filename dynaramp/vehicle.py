@@ -1,5 +1,6 @@
 import numpy as np
-from core import Basis
+
+from geometry import normalize
 
 
 class SimpleMotor:
@@ -12,34 +13,36 @@ class SimpleMotor:
 
 class Shoe:
 
-    def __init__(self, parent: RigidRocket2D, rel_pos: np.ndarray):
+    def __init__(self, parent: RigidRocket2D, rel_pos: np.ndarray,
+                 friction_coef: float, e_modulus: float=210e9, surf: float=0.02, l0: float=0.1):
         self.parent = parent
 
         self.deactivation_dist = 0
         self.dk, self.rk = rel_pos # X-axis distance from center of mass, Y-axis radius from centerline
 
         # Mechanical properties
-        self.e_modulus = 0
-        self.surf = 0
-        self.l0 = 0  # Relaxed length
+        self.e_modulus = e_modulus
+        self.surf = surf
+        self.l0 = l0  # Relaxed length
 
         self.spring_const = self.e_modulus * self.surf / self.l0
+        self.f_coef = friction_coef
 
     @property
     def contact_loc(self):
         # Contact location along the x-axis in rail coordinates
         return self.dk - self.rk * self.parent.theta  + self.parent.pos[0]
 
-    def force(self, beam_displacement: float):
+    def force_norm(self, beam_displacement: float):
         # Spring normal force
         disp = self.parent.pos[1] + beam_displacement - self.dk * self.parent.theta - self.rk - self.l0
-        return self.spring_const * disp * self.parent.basis.uz
+        return self.spring_const * disp
 
 
 class RigidRocket2D:
 
-    def __init__(self, parent_basis: Basis, motor: SimpleMotor, glow: float, inertia: float):
-        self.basis = parent_basis  # Rail coordinate system, FUR
+    def __init__(self, motor: SimpleMotor, glow: float, inertia: float):
+        # Rail coordinate system, FUR
         self.motor = motor
 
         self.mass = glow  # Gross lift off weight, kg
@@ -51,11 +54,15 @@ class RigidRocket2D:
 
         self.shoes = []
 
-    def add_shoe(self, rel_pos: np.ndarray):
+    def add_shoe(self, rel_pos: np.ndarray, friction_coef):
         # Add a shoe to the rocket, with the given relative (dk, rk) position in the rocket's local frame
-        self.shoes.append(Shoe(self, rel_pos))
+        self.shoes.append(Shoe(self, rel_pos, friction_coef))
 
-    def update(self, pos, theta, dt: float):
+    @property
+    def thrust_vec(self):
+        return self.motor.thrust * np.array([np.cos(self.theta), np.sin(self.theta), 0])
+
+    def update(self, pos, theta):
         self.pos = pos
         self.theta = theta
         # TODO: update mass based on fuel consumption

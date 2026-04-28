@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
-from geometry import normalize
+from .vector import normalize
 
 class Basis:
 
