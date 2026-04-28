@@ -1,13 +1,13 @@
 import numpy as np
 
 from beam import EulerBernoulliBeam
-from core import nnr_solver
-from ramp import Ramp
+from physics import nnr_solver
+from launchrail import LaunchRail
 from vehicle import RigidRocket2D, SimpleMotor, Shoe
 
 class System:
 
-    def __init__(self, ramp: Ramp, vehicle: RigidRocket2D):
+    def __init__(self, ramp: LaunchRail, vehicle: RigidRocket2D):
         self.ramp = ramp
         self.vehicle = vehicle
 
@@ -84,7 +84,7 @@ if __name__ == "__main__":
         return EulerBernoulliBeam(mu, E, I, L)
 
     Beam = make_beam()
-    Rail = Ramp(Beam, 4, np.pi/4)
+    Rail = LaunchRail(Beam, 4, np.pi / 4)
 
     # Based on Black Brandt X Rocket
     Motor = SimpleMotor(257e3, 280)

@@ -44,7 +44,7 @@ def newmarkbeta_solver(m, c, k, f_func, init_state, t_stop, dt, beta=0.25, gamma
 
 
 def nnr_solver(m, c, f_int_func, f_ext_func, init_state, t_stop, dt, beta=0.25, gamma=0.5, conv_err=1e-6):
-    # Newmark/Newton-Raphson ODE solver, for nonlinear dynamics.
+    # Newmark/Newton-Raphson solver, for nonlinear dynamics.
     # TODO: CFL number, adaptive time step size
     # Initializing problem
     q, q_dot = init_state  # initial state vector, generalized coordinates

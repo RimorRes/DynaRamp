@@ -1,6 +1,6 @@
 import numpy as np
 
-from geometry import normalize
+from geometry import Basis
 
 
 class SimpleMotor:
@@ -41,29 +41,15 @@ class Shoe:
 
 class RigidRocket2D:
 
-    def __init__(self, motor: SimpleMotor, glow: float, inertia: float):
-        # Rail coordinate system, FUR
-        self.motor = motor
+    def __init__(self, parent_basis: Basis, mass: float, inertia: float, start_pos: np.ndarray):
 
-        self.mass = glow  # Gross lift off weight, kg
+        self.mass = mass  # Gross lift off weight, kg
         self.J = inertia  # Mass moment of inertia around Y-axis, kg*m^2
 
-        # Location and orientation, 3D but constrained to XZ plane
-        self.theta = 0  # Angle around Z-axis
-        self.pos = np.array([0, 0, 0])
+        self.parent_basis = parent_basis
 
-        self.shoes = []
+        # Reminder: NED frame
+        self.pos = start_pos  # Position of the center of mass (in local rail coordinates)
+        self.theta = 0  # Rocket pitch angle, radians
+        self.rot_axis = parent_basis.uy  # Rocket pitch axis
 
-    def add_shoe(self, rel_pos: np.ndarray, friction_coef):
-        # Add a shoe to the rocket, with the given relative (dk, rk) position in the rocket's local frame
-        self.shoes.append(Shoe(self, rel_pos, friction_coef))
-
-    @property
-    def thrust_vec(self):
-        return self.motor.thrust * np.array([np.cos(self.theta), np.sin(self.theta), 0])
-
-    def update(self, pos, theta):
-        self.pos = pos
-        self.theta = theta
-        # TODO: update mass based on fuel consumption
-        # self.mass -= self.motor.m_dot * dt

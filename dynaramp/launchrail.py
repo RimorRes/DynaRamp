@@ -3,7 +3,7 @@ import numpy as np
 from scipy.integrate import quad
 
 
-class Ramp:
+class LaunchRail:
 
     def __init__(self, beam: EulerBernoulliBeam, n_modes: int, angle: float):
         self.beam = beam
