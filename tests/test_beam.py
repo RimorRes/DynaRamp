@@ -26,7 +26,7 @@ ws, phis = Beam.modes(1, 4)
 M, C, K = Beam.modal_matrices(4)
 
 print("Natural frequencies (rad/s):", ws)
-xs = np.linspace(0.0, L, 100)
+xs = np.linspace(0.0, Beam.L, 100)
 
 print("M", M)
 print("K", K)

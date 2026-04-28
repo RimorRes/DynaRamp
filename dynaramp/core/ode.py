@@ -49,7 +49,7 @@ def nnr_solver(m, c, f_int_func, f_ext_func, init_state, t_stop, dt, beta=0.25, 
     # Initializing problem
     q, q_dot = init_state  # initial state vector, generalized coordinates
     # Evaluate initial acceleration using the equation of motion, TODO: F_EXT CHECK ARGUMENTS
-    q_ddot = m.inv @ (f_ext_func(q, q_dot, 0) - f_int_func(q) - c @ q_dot)
+    q_ddot = np.linalg.inv(m) @ (f_ext_func(q, q_dot, 0) - f_int_func(q) - c @ q_dot)
 
     # Main loop, time stepping
     for t in np.arange(0, t_stop, dt):
@@ -70,6 +70,7 @@ def nnr_solver(m, c, f_int_func, f_ext_func, init_state, t_stop, dt, beta=0.25, 
             f_ext = f_ext_func(qk, qk_dot, t)  # TODO: CHECK ARGUMENTS
             f_int = f_int_func(qk)
             # Evaluate jacobian of internal forces
+            print("qk:", qk)
             res = jacobian(f_int_func, qk)
             assert res.status == 0
             k_tangent = res.df  # Slope of internal forces, equivalent stiffness at qk
