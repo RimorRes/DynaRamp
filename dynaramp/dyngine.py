@@ -65,11 +65,13 @@ class System:
                 is_active = x_k <= shoe.x_release
                 # Beam transverse deflection at contact (modal expansion)
                 w_k = sum(eta[i] * jax_shapes[i](x_k) for i in range(n_modes))
-                # Spring deformation: gap between shoe and natural length
-                delta_k = y + w_k - shoe.dk * theta - shoe.rk - shoe.l0
+                # Spring deformation: extension = rail_y − shoe_tip_y − l0
+                # shoe_tip_y ≈ y + rk + dk·θ  (rocket hangs below rail, y up)
+                delta_k = w_k - y - shoe.rk - shoe.dk * theta - shoe.l0
                 n_k = jnp.where(is_active, shoe.spring_const * delta_k, 0.0)
 
-                f = f.at[1].add(n_k)
+                # f_int[y] = ∂V/∂y = Nk · ∂δ/∂y = Nk · (−1) = −Nk
+                f = f.at[1].add(-n_k)
                 f = f.at[2].add(-shoe.dk * n_k)
                 for i in range(n_modes):
                     f = f.at[3 + i].add(jax_shapes[i](x_k) * n_k)
@@ -117,7 +119,7 @@ class System:
             x_k = s + shoe.dk - shoe.rk * theta
             is_active = x_k <= shoe.x_release
             w_k = self.ramp.displacement(x_k, eta)
-            delta_k = y + w_k - shoe.dk * theta - shoe.rk - shoe.l0
+            delta_k = w_k - y - shoe.dk * theta - shoe.rk - shoe.l0
             n_k = jnp.where(is_active, shoe.spring_const * delta_k, 0.0)
             f_ext[0] -= shoe.f_coef * abs(n_k) * np.sign(q_dot[0])
 
@@ -137,8 +139,8 @@ class System:
 if __name__ == "__main__":
 
     def make_beam():
-        b = 0.5/2
-        h = 1.0/2
+        b = 0.5
+        h = 1.0
         A = b * h
         rho = 7850
         mu = rho * A    # linear mass density, kg/m
@@ -166,28 +168,47 @@ if __name__ == "__main__":
     # Initial state: CG at s=5, y at shoe equilibrium (delta=0), theta=0
     shoe_l0 = Rocket.shoes[0].l0
     q0 = np.zeros(3 + Rail.n_modes)
-    q0[:3] = [5.0, r + shoe_l0, 0.0]   # y = rk + l0 → zero spring deformation
+    q0[:3] = [5.0, -(r + shoe_l0), 0.0]   # y = rk + l0 → zero spring deformation
     q_dot0 = np.zeros_like(q0)
 
+    ss, ys = [], []
     for t_val, vals in enumerate(nnr_solver(
         m=Sys.M,
         c=Sys.C,
         f_int_func=Sys.internal_forces,
         f_ext_func=Sys.external_forces,
         init_state=(q0, q_dot0),
-        t_stop=1,
+        t_stop=1.0,
         dt=0.005,
     )):
         q, q_dot, q_ddot = vals
-        print(f"t={t_val * 0.005:.3f}  s={q[0]:.4f}  y={q[1]:.6f}  theta={q[2]:.6f}")
+
+        active_shoe_count = sum(q[0] + shoe.dk - shoe.rk * q[2] <= shoe.x_release for shoe in Rocket.shoes)
+        ss.append(q[0])
+        ys.append(q[1])
+
+        print(f"t={t_val * 0.005:.3f}  s={q[0]:.4f}  y={q[1]:.6f}  theta={q[2]:.6f}  shoes={active_shoe_count}")
+
+        if active_shoe_count == 0:
+            print("Free flight!")
+            break
 
     print(f"Final state: theta={np.degrees(q[2]):.2f}°  theta_dot={np.degrees(q_dot[2]):.3f}°")
 
     # Plotting final state
     xs = np.linspace(0, Beam.L, 100)
     ws = np.array([Rail.displacement(x, q[3:]) for x in xs])
-    plt.plot(xs, ws)
-    plt.xlabel("x [m]")
-    plt.ylabel("w [m]")
-    plt.title("Final state")
+    fig, axs = plt.subplots(2, 1)
+
+    axs[0].plot(xs, ws)
+    axs[0].set_xlabel("s [m]")
+    axs[0].set_ylabel("w [m]")
+    axs[0].set_title("Beam Final state")
+
+    axs[1].scatter(ss, ys, color='r')
+    axs[1].set_xlabel("x [m]")
+    axs[1].set_ylabel("y [m]")
+    axs[1].set_title("Rocket trajectory in rail coordinates")
+
+    plt.tight_layout()
     plt.show()
