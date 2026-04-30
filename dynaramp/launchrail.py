@@ -1,6 +1,5 @@
 from beam import EulerBernoulliBeam
 import numpy as np
-import jax.numpy as jnp
 from scipy.integrate import quad
 
 

@@ -1,6 +1,7 @@
 import numpy as np
 
 from beam import EulerBernoulliBeam
+from geometry import Basis
 from physics import nnr_solver
 from launchrail import LaunchRail
 from vehicle import RigidRocket2D, SimpleMotor
@@ -31,7 +32,8 @@ r = 0.44 / 2
 h_rocket = 14.50
 inertia = 1 / 12 * mass * (3 * r ** 2 + h_rocket ** 2)
 
-Rocket = RigidRocket2D(None, motor=Motor, mass=mass, inertia=inertia)
+World_ref = Basis()
+Rocket = RigidRocket2D(parent_basis=World_ref, motor=Motor, mass=mass, inertia=inertia)
 Rocket.add_shoe(rel_pos=np.array([5.0, r]), friction_coef=0.5, release_point=Rail.beam.L)
 Rocket.add_shoe(rel_pos=np.array([-5.0, r]), friction_coef=0.5, release_point=Rail.beam.L)
 
@@ -48,7 +50,24 @@ q0_guess[:2] = [-(r + shoe_l0), 0.0]
 q0 = Sys.compute_static_equilibrium(s=5.0, q_free0=q0_guess)
 q_dot0 = np.zeros_like(q0)
 w0 = Rail.displacement(Rail.beam.L, q0[3:])
-print(f"Rough cantilever sag:  {rho*area*9.81*np.cos(Rail.angle)*length**4/(8*e_mod*sma)*1000:.2f} mm")
+
+print("Parameters:")
+print('='*40)
+print(f"Rail length:           {length:.2f} m")
+print(f"Rail width:             {b:.2f} m^2")
+print(f"Rail height:            {h:.2f} m^2")
+print(f"Rail elastic modulus:   {e_mod/1e9:.2f} GPa")
+print(f"Rail density:          {rho:.2f} kg/m^3")
+print("-"*40)
+print(f"Rail 2nd moment of area: {sma:.4f} m^4")
+print(f"Rail linear mass:       {mu:.2f} kg/m^2")
+print(f"Rough cantilever sag estimate:  {rho*area*9.81*np.cos(Rail.angle)*length**4/(8*e_mod*sma)*1000:.2f} mm")
+print("-"*40)
+print(f"Rocket mass:            {mass:.2f} kg")
+print("-"*40)
+for shoe in Rocket.shoes:
+    print(f"Shoe at dk={shoe.dk:.2f} m:  release point={shoe.x_release:.2f} m")
+print('='*40)
 print("Starting static equilibrium")
 print(f"equili.  s={q0[0]:.4f}  y={q0[1]:.6f}  theta={q0[2]:.6f}  w(L)={w0*1000:.2f} mm")
 
@@ -81,7 +100,7 @@ for t_val, vals in enumerate(nnr_solver(
         print("Free flight!")
         break
 
-print(f"Final state: theta={np.degrees(q[2]):.2f}°  theta_dot={np.degrees(q_dot[2]):.3f}°")
+print(f"Final state: theta={np.degrees(q_arr[-1][2]):.2f}°  theta_dot={np.degrees(q_dot_arr[-1][2]):.3f}°/s")
 
 # Convert to numpy arrays
 t_arr = np.array(t_arr)
