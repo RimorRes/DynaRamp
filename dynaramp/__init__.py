@@ -1,3 +1,3 @@
-import physics
-import geometry
-import beam
+from . import physics
+from . import geometry
+from . import beam
