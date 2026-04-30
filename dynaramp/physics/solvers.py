@@ -46,7 +46,7 @@ def newmarkbeta_solver(m, c, k, f_func, init_state, t_stop, dt, beta=0.25, gamma
 
 
 def _nnr_step(m, c, f_int_func, f_ext_func, j_func, state, t_new, dt,
-              beta=0.25, gamma=0.5, conv_err=1e-5, max_iter=50):
+              beta=0.25, gamma=0.5, conv_err=1e-4, max_iter=100):
     """
     Single Newmark/Newton-Raphson step from the converged state (q, q_dot, q_ddot)
     at time t to t_new = t + dt.
@@ -121,7 +121,7 @@ def _nnr_step(m, c, f_int_func, f_ext_func, j_func, state, t_new, dt,
 
 
 def nnr_solver(m, c, f_int_func, f_ext_func, init_state, t_stop, dt,
-               beta=0.25, gamma=0.5, conv_err=1e-5):
+               beta=0.25, gamma=0.5, conv_err=1e-4):
     """
     Newmark/Newton-Raphson generator solver for nonlinear structural dynamics.
 

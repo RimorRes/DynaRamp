@@ -49,7 +49,7 @@ class RigidRocket2D:
 class Shoe:
 
     def __init__(self, parent: RigidRocket2D, rel_pos: np.ndarray, release_point: float,
-                 friction_coef: float, e_modulus: float = 210e10,
+                 friction_coef: float, e_modulus: float = 210e9,
                  surf: float = 0.02, l0: float = 0.1):
         self.parent = parent
 
@@ -63,13 +63,4 @@ class Shoe:
         self.spring_const = self.e_modulus * self.surf / self.l0
         self.f_coef = friction_coef
 
-    @property
-    def contact_loc(self) -> float:
-        # Contact location along the rail x-axis, accounting for pitch
-        return self.parent.pos[0] + self.dk - self.rk * self.parent.theta
 
-    def force_norm(self, beam_displacement: float) -> float:
-        # Spring normal force from Lagrangian: N = k * delta, delta = y + w(x_k) - dk*theta - rk - l0
-        delta = (self.parent.pos[1] + beam_displacement
-                 - self.dk * self.parent.theta - self.rk - self.l0)
-        return self.spring_const * delta

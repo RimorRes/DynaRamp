@@ -48,8 +48,9 @@ q0_guess[:2] = [-(r + shoe_l0), 0.0]
 q0 = Sys.compute_static_equilibrium(s=5.0, q_free0=q0_guess)
 q_dot0 = np.zeros_like(q0)
 w0 = Rail.displacement(Rail.beam.L, q0[3:])
+print(f"Rough cantilever sag:  {rho*area*9.81*np.cos(Rail.angle)*length**4/(8*e_mod*sma)*1000:.2f} mm")
 print("Starting static equilibrium")
-print(f"equili.  s={q0[0]:.4f}  y={q0[1]:.6f}  theta={q0[2]:.6f}  w(L)={w0:.4f}")
+print(f"equili.  s={q0[0]:.4f}  y={q0[1]:.6f}  theta={q0[2]:.6f}  w(L)={w0*1000:.2f} mm")
 
 t_arr = []
 q_arr = []
@@ -64,6 +65,7 @@ for t_val, vals in enumerate(nnr_solver(
         init_state=(q0, q_dot0),
         t_stop=1.0,
         dt=t_step,
+        conv_err=1e-5,
 )):
     q, q_dot, q_ddot = vals
 
@@ -91,15 +93,18 @@ fig, ax = plt.subplots()
 
 s = q_arr[:, 0]
 y = q_arr[:, 1] + (r + shoe_l0)
-etas = q_dot_arr[:, 3:]
+theta = q_arr[:, 2]
+etas = q_arr[:, 3:]
 x = np.linspace(0, Rail.beam.L, 100)  # abscissa along the beam
 w = np.array([Rail.displacement(s, etas[0]) for s in x])
 
 line = ax.plot(x, w, label=f"Beam @ t={t_arr[0]:.3f}")[0]
-point = ax.scatter(s[0], y[0], c='orange', label="Rocket CG")
+xs = np.array([shoe.dk for shoe in Rocket.shoes])*np.cos(theta[0]) + s[0]
+ys = np.array([shoe.dk for shoe in Rocket.shoes])*np.sin(theta[0]) + y[0]
+points = ax.scatter(xs, ys, c='orange', label="Shoes")
 trail = ax.scatter(s[0], y[0], s=2, c='gray')
 
-ax.set(xlim=(0, 30), ylim=(-0.1, 0.1))
+ax.set(xlim=(0, 30), ylim=(-0.2, 0.05))
 ax.set(xlabel="x (m)", ylabel="w (m)", title="Beam Displacement")
 ax.grid()
 leg = ax.legend()
@@ -107,10 +112,13 @@ leg = ax.legend()
 def update(frame):
     w = np.array([Rail.displacement(xi, etas[frame]) for xi in x])
     trail_data = np.stack([s[:frame:2], y[:frame:2]]).T
-    point_data = np.stack([s[frame], y[frame]]).T
+
+    xs = np.array([shoe.dk for shoe in Rocket.shoes])*np.cos(theta[frame]) + s[frame]
+    ys = np.array([shoe.dk for shoe in Rocket.shoes])*np.sin(theta[frame]) + y[frame]
+    points_data = np.stack([xs, ys]).T
     # Update beam and rocket tracker
     line.set_ydata(w)
-    point.set_offsets(point_data)
+    points.set_offsets(points_data)
     trail.set_offsets(trail_data)
     # Update label
     lab = f"Beam @ t={t_arr[frame]:.3f}"
@@ -118,4 +126,5 @@ def update(frame):
     return line,
 
 ani = animation.FuncAnimation(fig, update, frames=len(t_arr), interval=5)
+ani.save('tip-off_animation.mp4', fps=30)
 plt.show()
