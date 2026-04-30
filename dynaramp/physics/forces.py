@@ -17,12 +17,12 @@ class PointOnRocket:
         :param q: generalized coordinates
         :return:
         """
-        xcg, zcg, theta = q[:3]
+        s, y, theta = q[:3]
 
         temp_basis = Basis(self.rocket.parent_basis)
         temp_basis.rotate(theta, self.rocket.rot_axis)
 
-        rocket_pos = self.rocket.parent_basis.global_transform @ np.array([xcg, 0.0, zcg])
+        rocket_pos = self.rocket.parent_basis.global_transform @ np.array([s, 0.0, y])
 
         # Position relative to rail base (origin) in global coordinates
         return temp_basis.global_transform @ self.point + rocket_pos
