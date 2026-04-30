@@ -1,8 +1,8 @@
 import numpy as np
 
-from launchrail import LaunchRail
-from vehicle import RigidRocket2D
-from geometry import Basis
+from ..launchrail import LaunchRail
+from ..vehicle import RigidRocket2D
+from ..geometry import Basis
 
 
 class PointOnRocket:
