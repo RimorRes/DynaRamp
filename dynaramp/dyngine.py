@@ -3,8 +3,8 @@ import jax
 import jax.numpy as jnp
 from scipy.optimize import root, least_squares
 
-from launchrail import LaunchRail
-from vehicle import RigidRocket2D
+from .launchrail import LaunchRail
+from .vehicle import RigidRocket2D
 
 
 class System:
