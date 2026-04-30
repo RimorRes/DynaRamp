@@ -32,13 +32,15 @@ class System:
 
         Generalized coordinates:  q = [s, y, theta, eta_1, ..., eta_n]
 
-        From the Lagrangian, shoe spring k with deformation
-            delta_k = y + phi(x_k)·eta - dk·theta - rk - l0
+        For shoe spring k, let the beam deflection at the contact point be
+            w_k = phi(x_k)·eta
+        and define the spring deformation using the implemented sign convention:
+            delta_k = w_k - y - rk - dk·theta - l0
             N_k     = spring_const * delta_k
-        contributes:
-            f_int[y]     += N_k
-            f_int[theta] += -dk * N_k          (moment arm, Lagrangian sign)
-            f_int[eta_i] += phi_i(x_k) * N_k  (mode-shape coupling)
+        Then the generalized internal-force contribution is
+            f_int[y]     += -N_k
+            f_int[theta] += -dk * N_k
+            f_int[eta_i] += phi_i(x_k) * N_k
         Plus beam modal stiffness (outside shoe loop):
             f_int[eta_i] += K_ii * eta_i
         """
