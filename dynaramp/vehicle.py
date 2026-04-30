@@ -1,6 +1,6 @@
 import numpy as np
 
-from geometry import Basis
+from .geometry import Basis
 
 
 class SimpleMotor:
