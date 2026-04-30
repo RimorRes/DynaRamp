@@ -1,4 +1,4 @@
-from beam import EulerBernoulliBeam
+from .beam import EulerBernoulliBeam
 import numpy as np
 from scipy.integrate import quad
 
