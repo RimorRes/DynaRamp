@@ -2,12 +2,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from beam import EulerBernoulliBeam
-from physics import nnr_solver
 from launchrail import LaunchRail
-from vehicle import RigidRocket2D, SimpleMotor
-
-import matplotlib.pyplot as plt
+from vehicle import RigidRocket2D
 
 
 class System:
@@ -47,7 +43,7 @@ class System:
         """
         shoes = self.vehicle.shoes
         jax_shapes = self.ramp.jax_modal_shapes
-        K_beam = jnp.array(self.ramp.K)
+        k_beam = jnp.array(self.ramp.K)
         n_modes = self.ramp.n_modes
 
         def f_int(q):
@@ -77,7 +73,7 @@ class System:
                     f = f.at[3 + i].add(jax_shapes[i](x_k) * n_k)
 
             # Beam modal stiffness restoring force (must be outside shoe loop)
-            f = f.at[3:].add(K_beam @ eta)
+            f = f.at[3:].add(k_beam @ eta)
 
             return f
 
@@ -108,13 +104,13 @@ class System:
 
         f_ext = np.zeros(3 + self.ramp.n_modes)
 
-        T = self.vehicle.motor.thrust if self.vehicle.motor is not None else 0.0
+        t = self.vehicle.motor.thrust if self.vehicle.motor is not None else 0.0
         m = self.vehicle.mass
         g = 9.81
         alpha = self.ramp.angle
 
         # Along rail: thrust + gravity - friction (velocity-dependent, non-smooth)
-        f_ext[0] = T * np.cos(theta) - m * g * np.sin(alpha)
+        f_ext[0] = t * np.cos(theta) - m * g * np.sin(alpha)
         for shoe in self.vehicle.shoes:
             x_k = s + shoe.dk - shoe.rk * theta
             is_active = x_k <= shoe.x_release
@@ -124,7 +120,7 @@ class System:
             f_ext[0] -= shoe.f_coef * abs(n_k) * np.sign(q_dot[0])
 
         # Transverse: thrust component + gravity
-        f_ext[1] = T * np.sin(theta) - m * g * np.cos(alpha)
+        f_ext[1] = t * np.sin(theta) - m * g * np.cos(alpha)
 
         # Pitch: no moment (thrust through CG)
         f_ext[2] = 0.0
@@ -134,81 +130,3 @@ class System:
                      * np.array(self.ramp.shape_ints))
 
         return f_ext
-
-
-if __name__ == "__main__":
-
-    def make_beam():
-        b = 0.5
-        h = 1.0
-        A = b * h
-        rho = 7850
-        mu = rho * A    # linear mass density, kg/m
-        E = 210e9       # elastic modulus, Pa
-        I = b * h ** 3 / 12
-        L = 20.0        # length, m
-        return EulerBernoulliBeam(mu, E, I, L)
-
-    Beam = make_beam()
-    Rail = LaunchRail(Beam, n_modes=4, angle=np.pi / 4)
-
-    # Black Brandt X approximate parameters
-    Motor = SimpleMotor(thrust=257e3, isp=280)
-    mass = 2600.0
-    r = 0.44 / 2
-    h_rocket = 14.50
-    inertia = 1 / 12 * mass * (3 * r ** 2 + h_rocket ** 2)
-
-    Rocket = RigidRocket2D(mass=mass, inertia=inertia, motor=Motor)
-    Rocket.add_shoe(rel_pos=np.array([5.0, r]), friction_coef=0.5, release_point=Rail.beam.L)
-    Rocket.add_shoe(rel_pos=np.array([-5.0, r]), friction_coef=0.5, release_point=Rail.beam.L)
-
-    Sys = System(Rail, Rocket)
-
-    # Initial state: CG at s=5, y at shoe equilibrium (delta=0), theta=0
-    shoe_l0 = Rocket.shoes[0].l0
-    q0 = np.zeros(3 + Rail.n_modes)
-    q0[:3] = [5.0, -(r + shoe_l0), 0.0]   # y = rk + l0 → zero spring deformation
-    q_dot0 = np.zeros_like(q0)
-
-    ss, ys = [], []
-    for t_val, vals in enumerate(nnr_solver(
-        m=Sys.M,
-        c=Sys.C,
-        f_int_func=Sys.internal_forces,
-        f_ext_func=Sys.external_forces,
-        init_state=(q0, q_dot0),
-        t_stop=1.0,
-        dt=0.005,
-    )):
-        q, q_dot, q_ddot = vals
-
-        active_shoe_count = sum(q[0] + shoe.dk - shoe.rk * q[2] <= shoe.x_release for shoe in Rocket.shoes)
-        ss.append(q[0])
-        ys.append(q[1])
-
-        print(f"t={t_val * 0.005:.3f}  s={q[0]:.4f}  y={q[1]:.6f}  theta={q[2]:.6f}  shoes={active_shoe_count}")
-
-        if active_shoe_count == 0:
-            print("Free flight!")
-            break
-
-    print(f"Final state: theta={np.degrees(q[2]):.2f}°  theta_dot={np.degrees(q_dot[2]):.3f}°")
-
-    # Plotting final state
-    xs = np.linspace(0, Beam.L, 100)
-    ws = np.array([Rail.displacement(x, q[3:]) for x in xs])
-    fig, axs = plt.subplots(2, 1)
-
-    axs[0].plot(xs, ws)
-    axs[0].set_xlabel("s [m]")
-    axs[0].set_ylabel("w [m]")
-    axs[0].set_title("Beam Final state")
-
-    axs[1].scatter(ss, ys, color='r')
-    axs[1].set_xlabel("x [m]")
-    axs[1].set_ylabel("y [m]")
-    axs[1].set_title("Rocket trajectory in rail coordinates")
-
-    plt.tight_layout()
-    plt.show()

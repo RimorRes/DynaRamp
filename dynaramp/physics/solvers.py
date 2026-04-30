@@ -48,47 +48,65 @@ def newmarkbeta_solver(m, c, k, f_func, init_state, t_stop, dt, beta=0.25, gamma
 def _nnr_step(m, c, f_int_func, f_ext_func, j_func, state, t_new, dt,
               beta=0.25, gamma=0.5, conv_err=1e-5, max_iter=50):
     """
-    Single Newmark/Newton-Raphson corrector step from state (q, q_dot, q_ddot)
+    Single Newmark/Newton-Raphson step from the converged state (q, q_dot, q_ddot)
     at time t to t_new = t + dt.
 
     EOM: M q̈ + C q̇ + f_int(q) = f_ext(q, q̇, t)
     Residual: R = f_ext - f_int - M q̈ - C q̇ = 0
 
-    Newmark kinematics tie q̈ and q̇ to q:
-        q̈_k = m_coef * (q_k - q̃)   where q̃ is the predictor position
-        q̇_k = q̇̃ + c_coef * (q_k - q̃)
+    The Newmark predictor stage rearranges the standard Newmark formulas to isolate out
+    the unknown new-step acceleration. Based on the previous converged state, the predictors for t_new are:
+        q_pred = q(t) + Δt·q̇(t) + Δt²(½ - β)·q̈(t)
+        q̇_pred = q̇(t) + Δt(1 - γ)·q̈(t)
+    These are the standard Newmark expressions for the next time step, with the
+    unknown new acceleration term factored out as a correction to be determined by
+    Newton iteration. The predictor-relative acceleration correction is initialized to zero,
+    and the iteration will solve for the consistent acceleration that satisfies the EOM at t_new.
 
-    Tangent stiffness K̂ = M·m_coef + C·c_coef + ∂f_int/∂q  (from JAX autodiff).
-    Newton update: K̂ Δq = R,  then q_k += Δq consistently.
+    The Newton stage then iterates on a displacement correction Δq. Newmark
+    kinematics tie q̈ and q̇ to q, at any given k-th iteration for the new state, through:
+        q̈_k = m_coef * (q_k - q_pred)
+        q̇_k = q̇_pred + c_coef * (q_k - q_pred)
+    where m_coef = 1/(β·Δt²) and c_coef = γ/(β·Δt).
+    The residual R depends on the trial state (q_trial, q̇_trial, q̈_trial), and Newton solves K̂·Δq = R,
+    where K̂ = M·m_coef + C·c_coef + ∂f_int/∂q is the tangent stiffness matrix.
+    Each Newton step updates:
+        q_trial += Δq
+        q̇_trial += c_coef * Δq
+        q̈_trial += m_coef * Δq
+    This ensures consistency between displacement, velocity, and acceleration
+    throughout the iteration. Convergence occurs when |Δq| < conv_err.
     """
     q, q_dot, q_ddot = state
 
     m_coef = 1.0 / (beta * dt ** 2)   # dq̈/dq from Newmark
     c_coef = gamma / (beta * dt)       # dq̇/dq from Newmark
 
-    # Explicit predictor (constant-acceleration assumption for initial guess)
-    q_pred = q + dt * q_dot + dt ** 2 * (0.5 - beta) * q_ddot
-    q_dot_pred = q_dot + dt * (1.0 - gamma) * q_ddot
+    # Standard Newmark predictors for position and velocity.
+    # They provide the initial guess for the Newton-Raphson iteration at t + dt.
+    # The trial displacement is then corrected by Δq, with q̇ and q̈ updated
+    # consistently from the same increment.
+    q_trial = q + dt * q_dot + dt ** 2 * (0.5 - beta) * q_ddot
+    q_dot_trial = q_dot + dt * (1.0 - gamma) * q_ddot
+    q_ddot_trial = np.zeros_like(q_trial)  # predictor-relative acceleration correction starts at zero
 
-    qk = q_pred.copy()
-    qk_dot = q_dot_pred.copy()
-    qk_ddot = np.zeros_like(q)   # starts at zero per standard predictor
+    delta_q = np.nan
 
     for iteration in range(max_iter):
-        f_ext = f_ext_func(qk, qk_dot, t_new)
-        f_int = f_int_func(qk)
+        f_ext = f_ext_func(q_trial, q_dot_trial, t_new)
+        f_int = f_int_func(q_trial)
 
-        residual = f_ext - f_int - m @ qk_ddot - c @ qk_dot
+        residual = f_ext - f_int - m @ q_ddot_trial - c @ q_dot_trial
 
-        k_tangent = np.asarray(j_func(jnp.array(qk, dtype=float)))
+        k_tangent = np.asarray(j_func(jnp.array(q_trial, dtype=float)))
         k_hat = m_coef * m + c_coef * c + k_tangent
 
         delta_q = solve(k_hat, np.asarray(residual))
 
         # Consistent Newmark update of all three kinematic quantities
-        qk = qk + delta_q
-        qk_dot = qk_dot + c_coef * delta_q
-        qk_ddot = qk_ddot + m_coef * delta_q
+        q_trial = q_trial + delta_q
+        q_dot_trial = q_dot_trial + c_coef * delta_q
+        q_ddot_trial = q_ddot_trial + m_coef * delta_q
 
         #print(np.linalg.norm(delta_q))
         if np.linalg.norm(delta_q) < conv_err:
@@ -99,7 +117,7 @@ def _nnr_step(m, c, f_int_func, f_ext_func, j_func, state, t_new, dt,
             f"|Δq|={np.linalg.norm(delta_q):.3e}"
         )
 
-    return qk, qk_dot, qk_ddot
+    return q_trial, q_dot_trial, q_ddot_trial
 
 
 def nnr_solver(m, c, f_int_func, f_ext_func, init_state, t_stop, dt,
