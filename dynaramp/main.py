@@ -8,9 +8,9 @@ from vehicle import RigidRocket2D, SimpleMotor
 from dyngine import System
 
 import matplotlib as mpl
+mpl.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib import animation
-mpl.use("TkAgg")
 
 
 
