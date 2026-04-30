@@ -87,14 +87,15 @@ for t_val, vals in enumerate(nnr_solver(
         conv_err=1e-5,
 )):
     q, q_dot, q_ddot = vals
+    current_time = (t_val + 1) * t_step
 
     active_shoe_count = sum(q[0] + shoe.dk - shoe.rk * q[2] <= shoe.x_release for shoe in Rocket.shoes)
 
-    t_arr.append(t_val * t_step)
+    t_arr.append(current_time)
     q_arr.append(q)
     q_dot_arr.append(q_dot)
 
-    print(f"t={t_val * t_step:.3f}  s={q[0]:.4f}  y={q[1]:.6f}  theta={q[2]:.6f}  shoes={active_shoe_count}")
+    print(f"t={current_time:.3f}  s={q[0]:.4f}  y={q[1]:.6f}  theta={q[2]:.6f}  shoes={active_shoe_count}")
 
     if active_shoe_count == 0:
         print("Free flight!")
