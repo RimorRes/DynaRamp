@@ -31,17 +31,25 @@ r = 0.44 / 2
 h_rocket = 14.50
 inertia = 1 / 12 * mass * (3 * r ** 2 + h_rocket ** 2)
 
-Rocket = RigidRocket2D(mass=mass, inertia=inertia, motor=Motor)
+Rocket = RigidRocket2D(None, motor=Motor, mass=mass, inertia=inertia)
 Rocket.add_shoe(rel_pos=np.array([5.0, r]), friction_coef=0.5, release_point=Rail.beam.L)
 Rocket.add_shoe(rel_pos=np.array([-5.0, r]), friction_coef=0.5, release_point=Rail.beam.L)
 
 Sys = System(Rail, Rocket)
 
-# Initial state: CG at s=5, y at shoe equilibrium (delta=0), theta=0
+# Compute static equilibrium before starting dynamic simulation.
+# We fix the CG position s=5.0 and solve for y, theta and modal coords so
+# the elastic internal forces balance the external loads (gravity, thrust).
 shoe_l0 = Rocket.shoes[0].l0
-q0 = np.zeros(3 + Rail.n_modes)
-q0[:3] = [5.0, -(r + shoe_l0), 0.0]  # y = rk + l0 → zero spring deformation
+q0_guess = np.zeros(2 + Rail.n_modes)
+q0_guess[:2] = [-(r + shoe_l0), 0.0]
+
+# Solve for static equilibrium with s fixed at 5.0
+q0 = Sys.compute_static_equilibrium(s=5.0, q_free0=q0_guess)
 q_dot0 = np.zeros_like(q0)
+w0 = Rail.displacement(Rail.beam.L, q0[3:])
+print("Starting static equilibrium")
+print(f"equili.  s={q0[0]:.4f}  y={q0[1]:.6f}  theta={q0[2]:.6f}  w(L)={w0:.4f}")
 
 t_arr = []
 q_arr = []
@@ -81,21 +89,30 @@ q_dot_arr = np.array(q_dot_arr)
 # Plotting and Animating beam
 fig, ax = plt.subplots()
 
+s = q_arr[:, 0]
+y = q_arr[:, 1] + (r + shoe_l0)
 etas = q_dot_arr[:, 3:]
 x = np.linspace(0, Rail.beam.L, 100)  # abscissa along the beam
 w = np.array([Rail.displacement(s, etas[0]) for s in x])
 
 line = ax.plot(x, w, label=f"Beam @ t={t_arr[0]:.3f}")[0]
+point = ax.scatter(s[0], y[0], c='orange', label="Rocket CG")
+trail = ax.scatter(s[0], y[0], s=2, c='gray')
 
-
-ax.set(xlim=(0, Rail.beam.L), ylim=(-1, 1))
+ax.set(xlim=(0, 30), ylim=(-0.1, 0.1))
 ax.set(xlabel="x (m)", ylabel="w (m)", title="Beam Displacement")
 ax.grid()
 leg = ax.legend()
 
 def update(frame):
-    w = np.array([Rail.displacement(s, etas[frame]) for s in x])
+    w = np.array([Rail.displacement(xi, etas[frame]) for xi in x])
+    trail_data = np.stack([s[:frame:2], y[:frame:2]]).T
+    point_data = np.stack([s[frame], y[frame]]).T
+    # Update beam and rocket tracker
     line.set_ydata(w)
+    point.set_offsets(point_data)
+    trail.set_offsets(trail_data)
+    # Update label
     lab = f"Beam @ t={t_arr[frame]:.3f}"
     leg.get_texts()[0].set_text(lab)
     return line,

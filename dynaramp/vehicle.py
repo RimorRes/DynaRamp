@@ -13,8 +13,8 @@ class SimpleMotor:
 
 class RigidRocket2D:
 
-    def __init__(self, mass: float, inertia: float, start_pos: np.ndarray = None,
-                 motor: SimpleMotor = None, parent_basis: Basis = None):
+    def __init__(self, parent_basis: Basis, motor: SimpleMotor, mass: float, inertia: float,
+                 start_pos: np.ndarray = None):
 
         self.mass = mass   # Gross lift off weight, kg
         self.J = inertia   # Mass moment of inertia around Y-axis, kg*m^2
@@ -49,7 +49,7 @@ class RigidRocket2D:
 class Shoe:
 
     def __init__(self, parent: RigidRocket2D, rel_pos: np.ndarray, release_point: float,
-                 friction_coef: float, e_modulus: float = 210e9,
+                 friction_coef: float, e_modulus: float = 210e10,
                  surf: float = 0.02, l0: float = 0.1):
         self.parent = parent
 
