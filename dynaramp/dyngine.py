@@ -1,109 +1,179 @@
 import numpy as np
+import jax
+import jax.numpy as jnp
+from scipy.optimize import root, least_squares
 
-from beam import EulerBernoulliBeam
-from core import nnr_solver
-from ramp import Ramp
-from vehicle import RigidRocket2D, SimpleMotor, Shoe
+from .launchrail import LaunchRail
+from .vehicle import RigidRocket2D
+
 
 class System:
 
-    def __init__(self, ramp: Ramp, vehicle: RigidRocket2D):
+    def __init__(self, ramp: LaunchRail, vehicle: RigidRocket2D):
         self.ramp = ramp
         self.vehicle = vehicle
 
-        n = self.ramp.n_modes + 3
+        n = self.ramp.n_modes + 3  # [s, y, theta, eta_1, ..., eta_n]
         self.M = np.zeros((n, n))
-        self.M[0,0] = self.vehicle.mass
-        self.M[1,1] = self.vehicle.mass
-        self.M[2,2] = self.vehicle.J
+        self.M[0, 0] = self.vehicle.mass
+        self.M[1, 1] = self.vehicle.mass
+        self.M[2, 2] = self.vehicle.J
         self.M[3:, 3:] = self.ramp.M
 
         self.C = np.zeros_like(self.M)
         self.C[3:, 3:] = self.ramp.C
 
-    def external_forces(self, q, q_dot, t):
-        f_ext = np.zeros(3+self.ramp.n_modes)
-        # Modal projection of the external forces
-        # f_s
-        f_ext[0] = self.vehicle.thrust_vec[0] - self.vehicle.mass*9.81*np.sin(self.ramp.angle)
-        for shoe in self.vehicle.shoes:
-            beam_disp = self.ramp.displacement(shoe.contact_loc)
-            f_ext[0] += - shoe.f_coef * np.abs(shoe.force_norm(beam_disp)) * np.sign(q_dot[0])
+        self._f_int_jax = self._build_f_int_jax()
 
-        # f_y
-        f_ext[1] = self.vehicle.thrust_vec[1] - self.vehicle.mass*9.81*np.cos(self.ramp.angle)
-        # f_theta
-        f_ext[2] = 0
-        # f_mode_amps
-        f_ext[3:] = -self.ramp.beam.mu * 9.81 * np.cos(self.ramp.angle) * np.array(self.ramp.shape_ints)
-        return f_ext
+    def _build_f_int_jax(self):
+        """
+        Build a JAX-traceable (and JIT-compiled) internal force function.
+        Internal forces = elastic restoring forces = +dV/dq (Lagrangian convention).
+
+        Generalized coordinates:  q = [s, y, theta, eta_1, ..., eta_n]
+
+        For shoe spring k, let the beam deflection at the contact point be
+            w_k = phi(x_k)·eta
+        and define the spring deformation using the implemented sign convention:
+            delta_k = w_k - y - rk - dk·theta - l0
+            N_k     = spring_const * delta_k
+        Then the generalized internal-force contribution is
+            f_int[y]     += -N_k
+            f_int[theta] += -dk * N_k
+            f_int[eta_i] += phi_i(x_k) * N_k
+        Plus beam modal stiffness (outside shoe loop):
+            f_int[eta_i] += K_ii * eta_i
+        """
+        shoes = self.vehicle.shoes
+        jax_shapes = self.ramp.jax_modal_shapes
+        k_beam = jnp.array(self.ramp.K)
+        n_modes = self.ramp.n_modes
+
+        def f_int(q):
+            s = q[0]
+            y = q[1]
+            theta = q[2]
+            eta = q[3:]
+
+            f = jnp.zeros(3 + n_modes)
+
+            for shoe in shoes:
+                # Contact location along rail: s + dk - rk*theta (small-angle)
+                x_k = s + shoe.dk - shoe.rk * theta
+                # Only apply force if shoe has not been released
+                is_active = x_k <= shoe.x_release
+                # Beam transverse deflection at contact (modal expansion)
+                w_k = sum(eta[i] * jax_shapes[i](x_k) for i in range(n_modes))
+                # Spring deformation: extension = rail_y − shoe_tip_y − l0
+                # shoe_tip_y ≈ y + rk + dk·θ  (rocket hangs below rail, y up)
+                delta_k = w_k - y - shoe.rk - shoe.dk * theta - shoe.l0
+                n_k = jnp.where(is_active, shoe.spring_const * delta_k, 0.0)
+
+                # f_int[y] = ∂V/∂y = Nk · ∂δ/∂y = Nk · (−1) = −Nk
+                f = f.at[1].add(-n_k)
+                f = f.at[2].add(-shoe.dk * n_k)
+                for i in range(n_modes):
+                    f = f.at[3 + i].add(jax_shapes[i](x_k) * n_k)
+
+            # Beam modal stiffness restoring force (must be outside shoe loop)
+            f = f.at[3:].add(k_beam @ eta)
+
+            return f
+
+        return jax.jit(f_int)
+
+    def compute_static_equilibrium(self, s: float, q_free0: np.ndarray | None = None, tol: float = 1e-4) -> np.ndarray:
+        n_free = 2 + self.ramp.n_modes  # [y, theta, eta_1, ..., eta_n]
+        if q_free0 is None:
+            q_free0 = np.zeros(n_free)
+            if self.vehicle.shoes:
+                # Rough sag guess: align shoe preload with rail at zero deflection.
+                q_free0[0] = -min(shoe.rk + shoe.l0 for shoe in self.vehicle.shoes)
+
+        j_func = jax.jacobian(self._f_int_jax)
+
+        def _assemble_q(q_free):
+            q = np.zeros(3 + self.ramp.n_modes)
+            q[0] = s
+            q[1:] = q_free
+            return q
+
+        def residual(q_free):
+            q = _assemble_q(q_free)
+            q_dot = np.zeros_like(q)
+            f_int = np.asarray(self.internal_forces(q))
+            f_ext = np.asarray(self.external_forces(q, q_dot, 0.0))
+            return (f_ext - f_int)[1:]
+
+        def jac(q_free):
+            q = _assemble_q(q_free)
+            jac_full = np.asarray(j_func(jnp.array(q, dtype=float)))
+            return -jac_full[1:, 1:]
+
+        sol = root(residual, q_free0, jac=jac, tol=tol, method="hybr")
+        if sol.success:
+            q_free = sol.x
+        else:
+            print(f"Static equilibrium solve failed: {sol.message}; ")
+            ls = least_squares(residual, q_free0, jac=jac, xtol=tol, ftol=tol, gtol=tol)
+            if not ls.success:
+                raise RuntimeError(
+                    f"Static equilibrium solve failed: {sol.message}; "
+                    f"least_squares: {ls.message}"
+                )
+            q_free = ls.x
+
+        q = _assemble_q(q_free)
+        return q
 
     def internal_forces(self, q):
-        pos = np.array([q[0], q[1], 0])
-        self.vehicle.update(pos, q[2])
+        # Returns a JAX array — keeps autodiff chain intact for jax.jacobian in the solver.
+        # Downstream numpy code accepts JAX arrays via __array__ protocol.
+        return self._f_int_jax(jnp.array(q, dtype=float))
 
-        f_int = np.zeros(3+self.ramp.n_modes)
-        # Modal projection of the internal forces
-        # f_s
-        f_int[0] = 0
+    def external_forces(self, q: np.ndarray, q_dot: np.ndarray, t: float) -> np.ndarray:
+        """
+        External (non-conservative) generalized forces.
 
+        Rail frame: x along rail, y transverse (away from rail), z down.
+        Gravity resolved along rail: g·sin(angle); transverse: g·cos(angle).
+
+        Rocket DOF:
+          f_ext[s]     = T·cos(θ) - m·g·sin(α) - Σ μ_k|N_k|·sign(ṡ)   [thrust + gravity + friction]
+          f_ext[y]     = T·sin(θ) - m·g·cos(α)                          [thrust + gravity transverse]
+          f_ext[theta] = 0                                               [no pitching moment]
+        Rail DOF (beam modes):
+          f_ext[η_i]   = -μ·g·cos(α)·∫φ_i dx                           [gravity on beam]
+        Note: shoe forces on the beam are already captured in f_int via Lagrangian coupling.
+        """
+        s, y, theta = q[0], q[1], q[2]
+        eta = q[3:]
+
+        f_ext = np.zeros(3 + self.ramp.n_modes)
+
+        thrust = self.vehicle.motor.thrust if t > 0.0 else 0.0
+        m = self.vehicle.mass
+        g = 9.81
+        alpha = self.ramp.angle
+
+        # Along rail: thrust + gravity - friction (velocity-dependent, non-smooth)
+        f_ext[0] = thrust * np.cos(theta) - m * g * np.sin(alpha)
         for shoe in self.vehicle.shoes:
-            beam_disp = self.ramp.displacement(shoe.contact_loc)
-            nk = shoe.force_norm(beam_disp)
-            # f_y
-            f_int[1] += nk
-            # f_theta
-            f_int[2] += shoe.dk * nk
-            # f_mode_amps
-            for i in range(self.ramp.n_modes):
-                f_int[3+i] += - shoe.dk * nk * self.ramp.modal_shapes[i](shoe.contact_loc)
-            f_int[3:] += self.ramp.K @ q[3:]
+            x_k = s + shoe.dk - shoe.rk * theta
+            is_active = x_k <= shoe.x_release
+            w_k = self.ramp.displacement(x_k, eta)
+            delta_k = w_k - y - shoe.dk * theta - shoe.rk - shoe.l0
+            n_k = jnp.where(is_active, shoe.spring_const * delta_k, 0.0)
+            f_ext[0] -= shoe.f_coef * abs(n_k) * np.sign(q_dot[0])
 
-        return f_int
+        # Transverse: thrust component + gravity
+        f_ext[1] = thrust * np.sin(theta) - m * g * np.cos(alpha)
 
+        # Pitch: no moment (thrust through CG)
+        f_ext[2] = 0.0
 
-if __name__ == "__main__":
-    def make_beam():
-        # Steel rectangular beam
-        b = 0.5
-        h = 1
-        A = b * h
-        rho = 7850
-        mu = rho * A  # linear mass density, kg/m
-        E = 210e9  # Elastic modulus, Pa
-        I = b * h ** 3 / 12  # Second moment of area, m^4
-        L = 20  # Length of the beam, m
+        # Beam modes: distributed gravity loading projected onto mode shapes
+        f_ext[3:] = (-self.ramp.beam.mu * g * np.cos(alpha)
+                     * np.array(self.ramp.shape_ints))
 
-        return EulerBernoulliBeam(mu, E, I, L)
-
-    Beam = make_beam()
-    Rail = Ramp(Beam, 4, np.pi/4)
-
-    # Based on Black Brandt X Rocket
-    Motor = SimpleMotor(257e3, 280)
-    mass = 2600
-    r = 0.44/2
-    h = 14.50
-    inertia = 1/12 * mass * (3*r**2 + h**2)
-    Rocket = RigidRocket2D(Motor, mass, inertia)
-    Rocket.add_shoe(rel_pos=np.array([5, r]), friction_coef=0.5)
-    Rocket.add_shoe(rel_pos=np.array([-5, r]), friction_coef=0.5)
-
-
-    Sys = System(Rail, Rocket)
-    q0 = np.zeros(3+Rail.n_modes)
-    q0[:3] = [5, -(r+0.1), 0]
-    q_dot0 = np.zeros(3+Rail.n_modes)
-
-    f_wrap = lambda qs: np.apply_along_axis(Sys.internal_forces, axis=0, arr=qs)
-
-    for vals in nnr_solver(
-        m=Sys.M,
-        c=Sys.C,
-        f_int_func=f_wrap,
-        f_ext_func=Sys.external_forces,
-        init_state=(q0, q_dot0),
-        t_stop=1,
-        dt=0.00001,
-    ):
-        print("Step:", vals[0][:2])
+        return f_ext

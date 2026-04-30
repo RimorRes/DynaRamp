@@ -1,4 +1,5 @@
 import numpy as np
+import jax.numpy as jnp
 from scipy.optimize import fsolve
 
 
@@ -65,6 +66,27 @@ class EulerBernoulliBeam:
 
             phis.append(phi_i)
 
+        return ws, phis
+
+    def jax_modes(self, n_start: int, n_modes: int):
+        # Same as modes() but mode shape functions use jnp — differentiable by JAX.
+        n_cache = len(self._roots)
+        n_stop = n_start + n_modes - 1
+        if n_stop > n_cache:
+            for n in range(n_stop - n_cache):
+                self._compute_nth_root(n_cache + n + 1)
+
+        ws = self.omegas[n_start - 1:n_stop]
+        phis = []
+        for beta in self.betas[n_start - 1:n_stop]:
+            b = float(beta)
+            L = float(self.L)
+            C = float((np.cos(b * L) + np.cosh(b * L)) / (np.sin(b * L) + np.sinh(b * L)))
+            phi_i = lambda x, _b=b, _C=C: (
+                (jnp.cosh(_b * x) - jnp.cos(_b * x))
+                - _C * (jnp.sinh(_b * x) - jnp.sin(_b * x))
+            )
+            phis.append(phi_i)
         return ws, phis
 
     def modal_matrices(self, n_modes=None):
