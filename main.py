@@ -1,11 +1,14 @@
 import numpy as np
 
-from beam import EulerBernoulliBeam
-from geometry import Basis
-from physics import nnr_solver
-from launchrail import LaunchRail
-from vehicle import RigidRocket2D, SimpleMotor
-from dyngine import System
+from dynaramp import (
+    EulerBernoulliBeam,
+    Basis,
+    nnr_solver,
+    LaunchRail,
+    RigidRocket2D,
+    SimpleMotor,
+    System,
+)
 
 import matplotlib as mpl
 mpl.use("TkAgg")
@@ -87,6 +90,7 @@ for t_val, vals in enumerate(nnr_solver(
         conv_err=1e-5,
 )):
     q, q_dot, q_ddot = vals
+    w = Rail.displacement(Rail.beam.L, q[3:])
     current_time = (t_val + 1) * t_step
 
     active_shoe_count = sum(q[0] + shoe.dk - shoe.rk * q[2] <= shoe.x_release for shoe in Rocket.shoes)
@@ -95,13 +99,14 @@ for t_val, vals in enumerate(nnr_solver(
     q_arr.append(q)
     q_dot_arr.append(q_dot)
 
-    print(f"t={current_time:.3f}  s={q[0]:.4f}  y={q[1]:.6f}  theta={q[2]:.6f}  shoes={active_shoe_count}")
+    print(f"t={current_time:.3f}  s={q[0]:.3f} m  y={q[1]:.3f} m  theta={np.degrees(q[2]):.3f}° "
+          f"∆w(L)={(w-w0)*1e3:.3f} mm  shoes={active_shoe_count}")
 
     if active_shoe_count == 0:
         print("Free flight!")
         break
 
-print(f"Final state: theta={np.degrees(q_arr[-1][2]):.2f}°  theta_dot={np.degrees(q_dot_arr[-1][2]):.3f}°/s")
+print(f"Final state: theta={np.degrees(q_arr[-1][2]):.3f}°  theta_dot={np.degrees(q_dot_arr[-1][2]):.3f}°/s")
 
 # Convert to numpy arrays
 t_arr = np.array(t_arr)
@@ -125,7 +130,7 @@ points = ax.scatter(xs, ys, c='orange', label="Shoes")
 trail = ax.scatter(s[0], y[0], s=2, c='gray')
 
 ax.set(xlim=(0, 30), ylim=(-0.2, 0.05))
-ax.set(xlabel="x (m)", ylabel="w (m)", title="Beam Displacement")
+ax.set(xlabel="x (m)", ylabel="w (m)", title="Beam Displacement vs Length")
 ax.grid()
 leg = ax.legend()
 
@@ -146,5 +151,4 @@ def update(frame):
     return line,
 
 ani = animation.FuncAnimation(fig, update, frames=len(t_arr), interval=5)
-ani.save('tip-off_animation.mp4', fps=30)
 plt.show()
