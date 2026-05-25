@@ -9,7 +9,7 @@ import networkx as nx
 
 @dataclass
 class Element:
-    elem_id: int
+    id: int
     U: np.ndarray
     U_extract: Dict[int, np.ndarray] = field(default_factory=dict)
     H: Optional[np.ndarray] = None
@@ -19,7 +19,7 @@ class Element:
 @dataclass
 class Connection:
     source: int
-    sink: int
+    target: int
     input_slot: int = 1
 
 @dataclass
