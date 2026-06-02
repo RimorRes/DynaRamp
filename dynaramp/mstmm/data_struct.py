@@ -1,30 +1,49 @@
 from __future__ import annotations
+import logging
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional
+from dataclasses import dataclass
+from typing import Dict, List
 
-import numpy as np
-import networkx as nx
+from numpy import ndarray
+
+
+logger = logging.getLogger(__name__)
+
+type ElemLike = int | Element
 
 
 @dataclass
 class Element:
-    id: int
-    U: np.ndarray
-    U_extract: Dict[int, np.ndarray] = field(default_factory=dict)
-    H: Optional[np.ndarray] = None
-    H_extract: Optional[Dict[int, np.ndarray]] = field(default_factory=dict)
+    eid: int
+    U: ndarray
 
 
 @dataclass
-class Connection:
+class MultiInputElement(Element):
+    H_ext: ndarray
+    U_exts: Dict[int, ndarray]
+    H_incs: Dict[int, ndarray]
+    main_slot: int  # Main input slot
+
+    def __post_init__(self):
+        # Ensure that U and H have the same keys
+        if self.U_exts.keys() != self.H_incs.keys():
+            err_msg = f"U and H must be defined for the same input slots. Got Us = {self.U_exts} and Hs = {self.H_incs}"
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+
+@dataclass
+class Link:
+    # For internal use only
     source: int
     target: int
-    input_slot: int = 1
+    slot: int | None = None  # Optional slot number for multi-input elements
+
 
 @dataclass
 class Boundary:
-    elem_id: int
+    eid: int
     free_dofs: List[int]
     fixed_dofs: List[int]
 
