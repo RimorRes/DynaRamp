@@ -23,7 +23,6 @@ class MultiInputElement(Element):
     H_ext: ndarray
     U_exts: Dict[int, ndarray]
     H_incs: Dict[int, ndarray]
-    main_slot: int  # Main input slot
 
     def __post_init__(self):
         # Ensure that U and H have the same keys
@@ -38,7 +37,8 @@ class Link:
     # For internal use only
     source: int
     target: int
-    slot: int | None = None  # Optional slot number for multi-input elements
+    # Slot number for multi-input elements
+    slot: int | None = None  # Leaving slot unspecified treats the target as a single-input element
 
 
 @dataclass
