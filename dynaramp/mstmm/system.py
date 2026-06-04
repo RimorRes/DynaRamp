@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Iterable
 
 import networkx as nx
 import numpy as np
@@ -23,6 +23,7 @@ class MBS:
 
         self.graph: nx.DiGraph | None = None
 
+
     @staticmethod
     def _resolve_eid(elem_or_eid: ElemLike) -> int:
         if isinstance(elem_or_eid, int):
@@ -39,17 +40,21 @@ class MBS:
         logger.error(err_msg)
         raise TypeError(err_msg)
 
-    def add_element(self, elem: Element) -> MBS:
-        # Strictly typed interface. Check that the element is an instance of Element or its subclasses
-        if not isinstance(elem, Element):
-            err_msg = f"Provided element must be an instance of Element or its subclasses. Got {type(elem).__name__}."
-            logger.error(err_msg)
-            raise TypeError(err_msg)
 
-        self.elements[elem.eid] = elem
-        logger.debug(f"Adding element {elem} to the system.")
+    def add_elements(self, *elems: Iterable[Element]) -> MBS:
+        for elem in elems:
+            # Strictly typed interface. Check that the element is an instance of Element or its subclasses
+            if not isinstance(elem, Element):
+                err_msg = (f"Provided element must be an instance of Element or its subclasses. "
+                           f"Got {type(elem).__name__}.")
+                logger.error(err_msg)
+                raise TypeError(err_msg)
+
+            self.elements[elem.eid] = elem
+            logger.debug(f"Adding element {elem} to the system.")
 
         return self
+
 
     def mark_root(self, root_elem: ElemLike) -> MBS:
         root_eid = self._resolve_eid(root_elem)
@@ -67,17 +72,18 @@ class MBS:
         return self
 
 
-    def mark_tip(self, tip_elem: ElemLike) -> MBS:
-        tip_eid = self._resolve_eid(tip_elem)
+    def mark_tips(self, tip_elems: Iterable[ElemLike]) -> MBS:
+        for tip_elem in tip_elems:
+            tip_eid = self._resolve_eid(tip_elem)
 
-        if tip_eid not in self.elements:
-            logger.error(f"Cannot mark root: element {tip_eid} is missing from the system. Add it.")
-        else:
-            if tip_eid in self._tip_eids:
-                logger.info(f"Element [{tip_eid}] is already marked as a tip. No action taken.")
+            if tip_eid not in self.elements:
+                logger.error(f"Cannot mark root: element {tip_eid} is missing from the system. Add it.")
             else:
-                self._tip_eids.append(tip_eid)
-                logger.debug(f"Marked element {tip_eid} as tip.")
+                if tip_eid in self._tip_eids:
+                    logger.info(f"Element [{tip_eid}] is already marked as a tip. No action taken.")
+                else:
+                    self._tip_eids.append(tip_eid)
+                    logger.debug(f"Marked element {tip_eid} as tip.")
 
         return self
 
@@ -120,13 +126,12 @@ class MBS:
         return self
 
 
-
     def link_elements(self, source_elem: ElemLike,
                       target_elem: ElemLike, slot: int | None = None) -> MBS:
 
         src_id = self._resolve_eid(source_elem)
         tgt_id = self._resolve_eid(target_elem)
-        log_prefix = f"Linking [{src_id}] -> [{tgt_id}]:"
+        log_prefix = f"[{src_id}] -> [{tgt_id}]:"
 
         # Prevent creating an invalid link referencing non-existent elements
         if src_id not in self.elements:
@@ -210,7 +215,7 @@ class MBS:
         logger.info(f"Building system graph with elements {self.elements}.")
 
         for eid in self.elements:
-            graph.add_node(eid)
+            graph.add_node(eid, etype=self.elements[eid].etype)
 
         for link in self._links:
             # Validate that all connections reference existing elements.
@@ -234,26 +239,55 @@ class MBS:
                     # Carry over the input slot number data for multi-input elements
                     graph.add_edge(src, tgt, slot=slot)
 
-        # Check that the graph is connected
-        if not nx.is_connected(graph.to_undirected()):
-            err_msg = "System graph invalid: there are disconnected components. Check your elements and links."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
+        logger.info(f"Built system graph.")
 
-        logger.info(f"Successfully built system graph.")
+        self._validate_graph(graph)
 
         return graph
 
 
-    def _auto_cut_hinges(self, graph: nx.DiGraph) -> Tuple[nx.DiGraph, List[Tuple[int, int]]]:
+    def _validate_graph(self, graph: nx.DiGraph) -> nx.DiGraph:
+
+        # Check that the graph is connected
+        if not nx.is_connected(graph.to_undirected()):
+            err_msg = "Invalid topology. There are disconnected components. Check your elements and links."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        # Count root-like elements
+        root_like = [n for n in graph if graph.out_degree(n) == 0]
+        match root_like:
+            case []:
+                logger.warning("No explicitly root-like element found. Consider checking your links. "
+                               "This may be the result of a looping system, "
+                               "in which case consider cutting the appropriate hinges.")
+            case [root]:
+                if root == self._root_eid:
+                    logger.info(f"Found single root-like element [{root}]. Matches designated root element.")
+                else:
+                    err_msg = f"Found single root-like element [{root}] that does not match designated root element."
+                    logger.error(err_msg)
+                    raise ValueError(err_msg)
+            case _:
+                err_msg = f"Invalid topology. Multiple root-like elements found: {root_like}. " \
+                          f"Consider checking your links and topology."
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+
+        logger.info(f"Validated system graph.")
+
+        return graph
+
+
+    def _auto_cut_connections(self, graph: nx.DiGraph) -> List[Tuple[int, int]]:
         if self._root_eid is None:
             err_msg = "Root element not identified. Mark it manually or run auto_mark_root."
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        new_tree = graph.copy()
-        cut_pairs = [] # Cut pairs generate new tip boundaries that need to be returned
-        # Identify and cut hinges to get a tree system
+        cut_pairs = []
+        # Identify and cut connections between elements to get a tree system
+        # Cutting a connection generates new tips/boundaries.
         # Branching nodes are body nodes with out_degree > 1
         # TODO: as is a hinge could also be multi-output and it would get cut. Potential issue?
         branching_nodes = [n for n in graph if graph.out_degree(n) > 1]
@@ -265,10 +299,9 @@ class MBS:
 
             for n in neighbors:
                 if n != preserved:
-                    new_tree.remove_edge(bnode, n)
                     cut_pairs.append((bnode, n))
-
-        return new_tree, cut_pairs
+        # Return edges to be cut
+        return cut_pairs
 
 
     def _transfer_path(self, tree: nx.DiGraph, source_eid: int, target_eid: int) -> np.ndarray:
@@ -290,4 +323,14 @@ class MBS:
 
 
     def make_tree(self):
+        # Check that expected tips and root have been defined
+        if self._root_eid is None:
+            err_msg = "Root element not identified."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+        if not self._tip_eids:
+            err_msg = "At least one tip element must be identified."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
         self.graph = self._build_graph()

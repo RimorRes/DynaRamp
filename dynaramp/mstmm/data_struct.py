@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Dict, List
 
 from numpy import ndarray
@@ -12,9 +13,15 @@ logger = logging.getLogger(__name__)
 type ElemLike = int | Element
 
 
+class ElementType(Enum):
+    BODY = auto()
+    HINGE = auto()
+
+
 @dataclass
 class Element:
     eid: int
+    etype: ElementType
     U: ndarray
 
 
