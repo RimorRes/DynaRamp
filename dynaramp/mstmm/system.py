@@ -5,12 +5,11 @@ from typing import Tuple, List, Dict, Iterable
 
 import networkx as nx
 import numpy as np
-from networkx.algorithms.shortest_paths.unweighted import predecessor
 
-from .data_struct import Link, Element, MultiInputElement, ElemLike
-
+from .data_struct import Link, Element, ComplexElement, ElemLike
 
 logger = logging.getLogger(__name__)
+
 
 class MBS:
 
@@ -22,7 +21,6 @@ class MBS:
         self._tip_eids: List[int] = []
 
         self.graph: nx.DiGraph | None = None
-
 
     @staticmethod
     def _resolve_eid(elem_or_eid: ElemLike) -> int:
@@ -40,8 +38,10 @@ class MBS:
         logger.error(err_msg)
         raise TypeError(err_msg)
 
+    def add_elements(self, elems: Element | Iterable[Element]) -> MBS:
+        if not isinstance(elems, Iterable):
+            elems = (elems,)
 
-    def add_elements(self, *elems: Iterable[Element]) -> MBS:
         for elem in elems:
             # Strictly typed interface. Check that the element is an instance of Element or its subclasses
             if not isinstance(elem, Element):
@@ -54,7 +54,6 @@ class MBS:
             logger.debug(f"Adding element {elem} to the system.")
 
         return self
-
 
     def mark_root(self, root_elem: ElemLike) -> MBS:
         root_eid = self._resolve_eid(root_elem)
@@ -71,8 +70,10 @@ class MBS:
 
         return self
 
+    def mark_tips(self, tip_elems: ElemLike | Iterable[ElemLike]) -> MBS:
+        if not isinstance(tip_elems, Iterable):
+            tip_elems = (tip_elems,)
 
-    def mark_tips(self, tip_elems: Iterable[ElemLike]) -> MBS:
         for tip_elem in tip_elems:
             tip_eid = self._resolve_eid(tip_elem)
 
@@ -87,8 +88,8 @@ class MBS:
 
         return self
 
-
-    def auto_mark_root(self) -> MBS:
+    def auto_resolve_root(self) -> MBS:
+        # TODO: fix this
         # Attempts to find the root element automatically
         # Loop over links and remove elements who have outputs
         potential_roots = set(self.elements.keys())
@@ -108,8 +109,8 @@ class MBS:
 
         return self
 
-
-    def auto_mark_tips(self) -> MBS:
+    def auto_resolve_tips(self) -> MBS:
+        # TODO: fix this
         # Attempts to find the tip elements automatically
         # Loop over links and remove elements who have inputs
         potential_tips = set(self.elements.keys())
@@ -125,9 +126,8 @@ class MBS:
 
         return self
 
-
-    def link_elements(self, source_elem: ElemLike,
-                      target_elem: ElemLike, slot: int | None = None) -> MBS:
+    def link_elements(self, source_elem: ElemLike, target_elem: ElemLike,
+                      output_slot: int | None = None, input_slot: int | None = None) -> MBS:
 
         src_id = self._resolve_eid(source_elem)
         tgt_id = self._resolve_eid(target_elem)
@@ -160,20 +160,21 @@ class MBS:
             logger.warning(f"{log_prefix} multiple links between the same elements are not allowed.")
             return self
 
-        # For type-dispatch, retrieve the stored target element
-        # We know the key exists
+        # For type-dispatch, retrieve the stored source and target elements
+        # We now know the keys exist
+        src_elem_obj = self.elements[src_id]
         tgt_elem_obj = self.elements[tgt_id]
         # Specific dispatching for multi-element types
 
         match tgt_elem_obj:
 
-            case MultiInputElement():
+            case ComplexElement():
                 # Assigning the main input. The primary input occupies the special None slot.
-                if slot is None:
+                if input_slot is None:
                     # Check if main slot is populated already
                     if None in occupied_slots:
                         logger.error(f"{log_prefix} main slot of element [{tgt_id}] is already populated. Assign to "
-                                       f"a free slot to link to an auxiliary input.")
+                                     f"a free slot to link to an auxiliary input.")
                         return self
                     # If not, proceed to populate it
                     logger.debug(f"{log_prefix} populating main input.")
@@ -181,22 +182,22 @@ class MBS:
                 # Assigning an auxillary input
                 else:
                     # Check if slot is valid
-                    if slot not in tgt_elem_obj.U_exts:
-                        logger.error(f"{log_prefix} slot [{slot}] has not been defined for element [{tgt_id}].")
+                    if input_slot not in tgt_elem_obj.U_exts:
+                        logger.error(f"{log_prefix} slot [{input_slot}] has not been defined for element [{tgt_id}].")
                         return self
                     # Check if slot is populated already
-                    if slot in occupied_slots:
-                        logger.error(f"{log_prefix} slot [{slot}] of element [{tgt_id}] is already populated.")
+                    if input_slot in occupied_slots:
+                        logger.error(f"{log_prefix} slot [{input_slot}] of element [{tgt_id}] is already populated.")
                         return self
                     # If all checks are passed, link the source to the target at the designated slot
-                    logger.debug(f"{log_prefix} linking to auxiliary input slot [{slot}].")
-                    self._links.append(Link(src_id, tgt_id, slot))
+                    logger.debug(f"{log_prefix} linking to auxiliary input slot [{input_slot}].")
+                    self._links.append(Link(src_id, tgt_id, input_slot))
 
             case Element():
                 # Check if previously linked
                 if sources:
                     logger.error(f"{log_prefix} element [{tgt_id}] is single-input "
-                                   f"but already has a link from source {sources}.")
+                                 f"but already has a link from source {sources}.")
                     return self
 
                 logger.debug(f"{log_prefix} linking single-input element.")
@@ -207,7 +208,6 @@ class MBS:
                 logger.error(f"{log_prefix} element {tgt_id} is of unsupported type {type(tgt_elem_obj).__name__}.")
 
         return self
-
 
     def _build_graph(self) -> nx.DiGraph:
         # Bodies and Hinges are BOTH nodes in this graph instead of Hinges being edges
@@ -241,10 +241,7 @@ class MBS:
 
         logger.info(f"Built system graph.")
 
-        self._validate_graph(graph)
-
         return graph
-
 
     def _validate_graph(self, graph: nx.DiGraph) -> nx.DiGraph:
 
@@ -278,31 +275,37 @@ class MBS:
 
         return graph
 
-
-    def _auto_cut_connections(self, graph: nx.DiGraph) -> List[Tuple[int, int]]:
-        if self._root_eid is None:
-            err_msg = "Root element not identified. Mark it manually or run auto_mark_root."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        cut_pairs = []
+    def _find_cuts(self, graph: nx.DiGraph) -> List[Tuple[int, int]]:
         # Identify and cut connections between elements to get a tree system
-        # Cutting a connection generates new tips/boundaries.
-        # Branching nodes are body nodes with out_degree > 1
-        # TODO: as is a hinge could also be multi-output and it would get cut. Potential issue?
-        branching_nodes = [n for n in graph if graph.out_degree(n) > 1]
-        for bnode in branching_nodes:
+        # At this step a SINGLE desired root is assumed to be selected
+        cut_pairs = []
+
+        # Handle the case of DIVERGING NODES (out_degree > 1)
+        #   Cutting a connection in this case generates two new INPUT tips/boundaries.
+        #   C sign matrix needed
+        #   Branching nodes are body nodes with out_degree > 1
+        diverging_nodes = [n for n in graph if graph.out_degree(n) > 1]
+        for bnode in diverging_nodes:
             neighbors = list(graph.successors(bnode))
             # Each element can only have one output
             # We can choose to only keep the output with the shortest path to root
+
             preserved = nx.shortest_path(graph, source=bnode, target=self._root_eid)[1]
 
             for n in neighbors:
                 if n != preserved:
                     cut_pairs.append((bnode, n))
+
+        # Handle the potential closed-loop containing the ROOT
+        #   Cutting a connection in this case generates a new INPUT and OUTPUT.
+        #   No C sign matrix needed. Both state vectors are equal
+        if graph.out_degree(self._root_eid) > 0:
+            neighbors = list(graph.successors(self._root_eid))
+            for n in neighbors:
+                cut_pairs.append((self._root_eid, n))
+
         # Return edges to be cut
         return cut_pairs
-
 
     def _transfer_path(self, tree: nx.DiGraph, source_eid: int, target_eid: int) -> np.ndarray:
         # Get the path from the tip to the root in the tree
@@ -312,18 +315,16 @@ class MBS:
         transfer_matrix = self.elements[source_eid].U
         prev_node = source_eid
         for node in path[1:]:
-
             pass
 
         return transfer_matrix
 
-
     def _geometric_relation(self):
         pass
 
-
-    def make_tree(self):
+    def make_tree(self, cut_connections: List[Tuple[int, int]]) -> MBS:
         # Check that expected tips and root have been defined
+        # TODO: offer auto root and tip resolution
         if self._root_eid is None:
             err_msg = "Root element not identified."
             logger.error(err_msg)

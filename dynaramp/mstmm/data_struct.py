@@ -1,11 +1,13 @@
 from __future__ import annotations
 import logging
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, List
+from typing import Dict, List, Set
 
-from numpy import ndarray
+import numpy as np
+
+from dynaramp.vecmath import skew_sym_mat
 
 
 logger = logging.getLogger(__name__)
@@ -22,21 +24,37 @@ class ElementType(Enum):
 class Element:
     eid: int
     etype: ElementType
-    U: ndarray
+    U: np.ndarray
 
 
 @dataclass
-class MultiInputElement(Element):
-    H_ext: ndarray
-    U_exts: Dict[int, ndarray]
-    H_incs: Dict[int, ndarray]
+class ComplexElement(Element):
+    slots_pos: Dict[int, np.ndarray]  # positions of slots relative to the main input
+    occ_slots: Set[int]  # slot occupancy
+    H_ext: np.ndarray = field(init=False)
+    U_exts: Dict[int, np.ndarray] = field(init=False)
+    H_incs: Dict[int, np.ndarray] = field(init=False)
 
     def __post_init__(self):
-        # Ensure that U and H have the same keys
-        if self.U_exts.keys() != self.H_incs.keys():
-            err_msg = f"U and H must be defined for the same input slots. Got Us = {self.U_exts} and Hs = {self.H_incs}"
-            logger.error(err_msg)
-            raise ValueError(err_msg)
+        self.occ_slots = set()
+        self.U_exts = {}
+        self.H_incs = {}
+        # Auto-generate the extraction and incidence matrices
+        for s in self.slots_pos:
+            r = self.slots_pos[s]  # position of slot relative to the main input
+            # H extraction
+            self.H_ext = np.zeros((6, 12))
+            self.H_ext[:, :6] = np.identity(6)
+            # U extraction
+            self.U_exts[s] = np.zeros((12,12))
+            ublock = np.identity(6)
+            ublock[3:, :3] = skew_sym_mat(r)
+            self.U_exts[s][6:, 6:] = ublock
+            # H incidence
+            self.H_incs[s] = np.zeros((6, 12))
+            hblock = np.identity(6)
+            hblock[:3, 3:] = skew_sym_mat(r)
+            self.H_incs[s][:, :6] = hblock
 
 
 @dataclass
@@ -53,4 +71,3 @@ class Boundary:
     eid: int
     free_dofs: List[int]
     fixed_dofs: List[int]
-
