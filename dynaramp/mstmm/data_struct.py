@@ -22,7 +22,7 @@ class ElementType(Enum):
 
 @dataclass
 class Element:
-    eid: Hashable
+    e_id: Hashable
     etype: ElementType
     U: np.ndarray
     slots: Dict[Hashable, np.ndarray]  # positions of slots relative to the main input
@@ -54,6 +54,6 @@ class Element:
 
 @dataclass
 class Boundary:
-    eid: Hashable
+    b_id: Hashable
     free_dofs: List[int]
     fixed_dofs: List[int]

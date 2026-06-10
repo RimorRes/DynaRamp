@@ -5,8 +5,9 @@ from typing import Tuple, List, Dict, Iterable, Hashable
 
 import networkx as nx
 import numpy as np
+from networkx.algorithms import boundary
 
-from .data_struct import Element, ElemLike
+from .data_struct import Element, ElemLike, Boundary
 
 logger = logging.getLogger(__name__)
 
@@ -17,16 +18,16 @@ class MBS:
         self.elements: Dict[Hashable, Element] = {}
         self._populated_slots: Dict[Hashable, List[int | None]] = {}
 
-        self._root_eid: Hashable | None = None
-        self._tip_eids: List[Hashable] = []
+        self._root: Boundary | None = None
+        self._boundaries: Dict[Hashable, Boundary] = {}
 
         self.graph: nx.DiGraph = nx.DiGraph()
 
     @staticmethod
     def _resolve_eid(elem_or_eid: ElemLike | Hashable) -> Hashable:
-        # Accept raw hashable IDs directly, but prefer an object's explicit `eid` attribute.
+        # Accept raw hashable IDs directly but prefer an object's explicit `eid` attribute.
         if hasattr(elem_or_eid, "eid"):
-            eid = elem_or_eid.eid
+            eid = elem_or_eid.e_id
             if isinstance(eid, Hashable):
                 return eid
             err_msg = "Provided element has an unhashable `eid`."
@@ -55,89 +56,55 @@ class MBS:
                 logger.error(err_msg)
                 raise TypeError(err_msg)
 
-            self.elements[elem.eid] = elem
-            self.graph.add_node(elem.eid)
-            logger.debug(f"Adding element {elem.eid} to the system.")
+            self.elements[elem.e_id] = elem
+            self.graph.add_node(elem.e_id)
+            logger.debug(f"Adding element {elem.e_id} to the system.")
 
         return self
 
-    def mark_root(self, root_elem: ElemLike) -> MBS:
-        root_eid = self._resolve_eid(root_elem)
+    def add_root(self, root_boundary: Boundary, target_elem: ElemLike, output_slot: int) -> MBS:
+        if self._root is not None:
+            logger.warning(f"Root boundary is already defined as [{self._root.b_id}]. No action taken.")
+            return self
 
-        if root_eid not in self.elements:
-            logger.error(f"Cannot mark root: element {root_eid} is missing from the system. Add it.")
-        else:
-            if self._root_eid is not None:
-                logger.warning(f"Overwriting previously marked root element [{self._root_eid}] "
-                               f"with new root [{root_eid}].")
+        tgt_id = self._resolve_eid(target_elem)
+        if tgt_id not in self.elements:
+            logger.error(f"Cannot add root: target element [{tgt_id}] is missing from the system. Add it.")
+            return self
 
-            self._root_eid = root_eid
-            logger.debug(f"Marked element {root_eid} as root.")
+        self._root = root_boundary
+        self._boundaries[root_boundary.b_id] = root_boundary
+        self.graph.add_node(root_boundary.b_id)
+        self.graph.add_edge(tgt_id, root_boundary.b_id, src_slot=output_slot)
 
-        return self
-
-    def mark_tips(self, tip_elems: ElemLike | Iterable[ElemLike]) -> MBS:
-        if not isinstance(tip_elems, Iterable):
-            tip_elems = (tip_elems,)
-
-        for tip_elem in tip_elems:
-            tip_eid = self._resolve_eid(tip_elem)
-
-            if tip_eid not in self.elements:
-                logger.error(f"Cannot mark root: element {tip_eid} is missing from the system. Add it.")
-            else:
-                if tip_eid in self._tip_eids:
-                    logger.info(f"Element [{tip_eid}] is already marked as a tip. No action taken.")
-                else:
-                    self._tip_eids.append(tip_eid)
-                    logger.debug(f"Marked element {tip_eid} as tip.")
+        logger.debug(f"Added [{root_boundary.b_id}] as the root boundary to element [{tgt_id}].")
 
         return self
 
-    def auto_resolve_root(self) -> MBS:
-        # TODO: fix this
-        # Attempts to find the root element automatically
-        # Loop over links and remove elements who have outputs
-        potential_roots = set(self.elements.keys())
-        for link in self._links:
-            if link.target in potential_roots:
-                potential_roots.remove(link.target)
+    def add_tip(self, tip_boundary: Boundary, target_element: ElemLike, input_slot: int) -> MBS:
+        tgt_id = self._resolve_eid(target_element)
+        if tgt_id not in self.elements:
+            logger.error(f"Cannot add tip: target element [{tgt_id}] is missing from the system. Add it.")
+            return self
 
-        if not potential_roots:
-            logger.warning("Cannot find any root in the system. Consider marking one manually.")
-        else:
-            try:
-                root, = potential_roots  # Only works for a singleton
-                logger.info(f"Auto-identified root element: [{root}]. Marking it as root.")
-                self._root_eid = root
-            except ValueError as exc:
-                logger.error(f"Auto-identified multiple root elements: {potential_roots}. Invalid system structure.")
+        if tip_boundary in self._boundaries:
+            logger.warning(f"Boundary [{tip_boundary.b_id}] is already defined. No action taken.")
+            return self
 
-        return self
+        self._boundaries[tip_boundary.b_id] = tip_boundary
+        self.graph.add_node(tip_boundary.b_id)
+        self.graph.add_edge(tip_boundary.b_id, tgt_id, dst_slot=input_slot)
 
-    def auto_resolve_tips(self) -> MBS:
-        # TODO: fix this
-        # Attempts to find the tip elements automatically
-        # Loop over links and remove elements who have inputs
-        potential_tips = set(self.elements.keys())
-        for link in self._links:
-            if link.target in potential_tips:
-                potential_tips.remove(link.target)
-
-        if not potential_tips:
-            logger.warning("Cannot find any tips in the system. Consider marking them manually.")
-        else:
-            logger.info(f"Auto-identified tip elements: {potential_tips}. Marking them as tips.")
-            self._tip_eids.extend(potential_tips)
+        logger.debug(f"Added [{tip_boundary.b_id}] as a tip boundary to element [{tgt_id}].")
 
         return self
 
     def connect_elements(
-        self,
-        src: ElemLike,
-        dst: ElemLike,
-        src_slot: int,
-        dst_slot: int | None = None,
+            self,
+            src: ElemLike,
+            dst: ElemLike,
+            src_slot: int,
+            dst_slot: int | None = None,
     ) -> MBS:
 
         src_id = self._resolve_eid(src)
@@ -159,7 +126,7 @@ class MBS:
 
         # Check if the directed edge already exists (regardless of slot)
         if (src_id, dst_id) in self.graph.edges:
-            logger.warning(f"{log_prefix} multiple directed edges between the same elements are not allowed.")
+            logger.warning(f"{log_prefix} parallel edges between the same elements are not allowed.")
             return self
 
         # For type-dispatch, retrieve the stored source and target elements
@@ -196,32 +163,17 @@ class MBS:
         return self
 
     def _validate_graph(self, graph: nx.DiGraph) -> nx.DiGraph:
-
+        # TODO: fix this
         # Check that the graph is connected
         if not nx.is_connected(graph.to_undirected()):
             err_msg = "Invalid topology. There are disconnected components. Check your elements and links."
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        # Count root-like elements
-        root_like = [n for n in graph if graph.out_degree(n) == 0]
-        match root_like:
-            case []:
-                logger.warning("No explicitly root-like element found. Consider checking your links. "
-                               "This may be the result of a looping system, "
-                               "in which case consider cutting the appropriate hinges.")
-            case [root]:
-                if root == self._root_eid:
-                    logger.info(f"Found single root-like element [{root}]. Matches designated root element.")
-                else:
-                    err_msg = f"Found single root-like element [{root}] that does not match designated root element."
-                    logger.error(err_msg)
-                    raise ValueError(err_msg)
-            case _:
-                err_msg = f"Invalid topology. Multiple root-like elements found: {root_like}. " \
-                          f"Consider checking your links and topology."
-                logger.error(err_msg)
-                raise ValueError(err_msg)
+        # Check that all elements can flow to the root
+        pass
+        # Should probably detect if the root is looped
+        pass
 
         logger.info(f"Validated system graph.")
 
@@ -241,7 +193,7 @@ class MBS:
             neighbors = list(graph.successors(dnode))
             # Each element can only have one output
             # We can choose to only keep the output with the shortest path to root
-            preserved = nx.shortest_path(graph, source=dnode, target=self._root_eid)[1]
+            preserved = nx.shortest_path(graph, source=dnode, target=self._root.b_id)[1]
             for n in neighbors:
                 if n != preserved:
                     cut_pairs.append((dnode, n))
@@ -255,7 +207,39 @@ class MBS:
                 cut_pairs.append((self._root_eid, n))
 
         # Return edges to be cut
+        logger.info(f"Found {len(cut_pairs)} cuts to be made.")
+        for i, (src, dst) in enumerate(cut_pairs):
+            logger.debug(f"Cut {i}: {src}->{dst}")
+
         return cut_pairs
+
+    def _execute_cuts(
+            self,
+            graph: nx.DiGraph,
+            cut_pairs: Iterable[Tuple[Hashable, Hashable]]
+    ) -> nx.DiGraph:
+        new_graph = graph.copy()
+
+        for (src, dst) in cut_pairs:
+            if new_graph.out_degree(src) == 1:
+                new_graph.remove_edge(src, dst)
+
+
+
+
+        return new_graph
+
+
+    def make_tree(self, cut_connections: List[Tuple[Hashable, Hashable]]) -> MBS:
+        # Check that expected tips and root have been defined
+        # TODO: offer auto root and tip resolution
+        if self._root_eid is None:
+            err_msg = "Root element not identified."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        # First, execute user-defined cuts
+        # Then cut the remaining connections to get a tree system
 
     def _transfer_path(self, tree: nx.DiGraph, source_eid: Hashable, target_eid: Hashable) -> np.ndarray:
         # Get the path from the tip to the root in the tree
@@ -272,16 +256,3 @@ class MBS:
     def _geometric_relation(self):
         pass
 
-    def make_tree(self, cut_connections: List[Tuple[Hashable, Hashable]]) -> MBS:
-        # Check that expected tips and root have been defined
-        # TODO: offer auto root and tip resolution
-        if self._root_eid is None:
-            err_msg = "Root element not identified."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-        if not self._tip_eids:
-            err_msg = "At least one tip element must be identified."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        self.graph = self._build_graph()
