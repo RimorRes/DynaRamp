@@ -57,3 +57,18 @@ class Boundary:
     b_id: Hashable
     free_dofs: List[int]
     fixed_dofs: List[int]
+
+@dataclass
+class CutPoint:
+    b_id1: Hashable
+    b_id2: Hashable
+    sign_matrix: bool = True
+    mat: np.ndarray = field(init=False)
+
+    def __post_init__(self):
+        self.mat = np.identity(12)
+        if self.sign_matrix:
+            self.mat[6:, 6:] *= -1
+
+
+
