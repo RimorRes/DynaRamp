@@ -55,8 +55,7 @@ class Element:
 @dataclass
 class Boundary:
     b_id: Hashable
-    free_dofs: List[int]
-    fixed_dofs: List[int]
+    state_vector: np.ndarray  # Numerical value for known boundary value, None for unknown
 
 @dataclass
 class CutPoint:

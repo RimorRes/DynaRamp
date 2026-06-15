@@ -19,6 +19,7 @@ class MBS:
 
         self._root: Boundary | None = None
         self._boundaries: Dict[Hashable, Boundary] = {}
+        self._cut_points: List[CutPoint] = []
 
         self.graph: nx.DiGraph = nx.DiGraph()
 
@@ -61,7 +62,8 @@ class MBS:
 
         return self
 
-    def add_root(self, root_boundary: Boundary, target_elem: ElemLike, output_slot: int) -> MBS:
+    def add_root(self, boundary_sv: np.ndarray, target_elem: ElemLike, output_slot: int) -> Hashable:
+        # NO SLOT OVERWRITE PROTECTION
         if self._root is not None:
             err_msg = f"Root boundary is already defined as [{self._root.b_id}]."
             logger.error(err_msg)
@@ -73,33 +75,32 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
+        root_boundary = Boundary(b_id=f"{tgt_id}.{output_slot},0", state_vector=boundary_sv)
         self._root = root_boundary
         self._boundaries[root_boundary.b_id] = root_boundary
         self.graph.add_node(root_boundary.b_id)
-        self.graph.add_edge(tgt_id, root_boundary.b_id, src_slot=output_slot)
+        self.graph.add_edge(tgt_id, root_boundary.b_id, src_slot=output_slot, dst_slot=None)
 
         logger.debug(f"Added [{root_boundary.b_id}] as the root boundary to element [{tgt_id}].")
 
-        return self
+        return root_boundary.b_id
 
-    def add_tip(self, tip_boundary: Boundary, target_element: ElemLike, input_slot: int) -> MBS:
+    def add_tip(self, boundary_sv: np.ndarray, target_element: ElemLike, input_slot: int) -> Hashable:
+        # NO SLOT OVERWRITE PROTECTION
         tgt_id = self._resolve_elem_id(target_element)
         if tgt_id not in self.elements:
             err_msg = f"Cannot add tip: target element [{tgt_id}] is missing from the system. Add it."
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        if tip_boundary in self._boundaries:
-            logger.warning(f"Boundary [{tip_boundary.b_id}] is already defined. No action taken.")
-            return self
-
+        tip_boundary = Boundary(b_id=f"{tgt_id}.{input_slot},0", state_vector=boundary_sv)
         self._boundaries[tip_boundary.b_id] = tip_boundary
         self.graph.add_node(tip_boundary.b_id)
-        self.graph.add_edge(tip_boundary.b_id, tgt_id, dst_slot=input_slot)
+        self.graph.add_edge(tip_boundary.b_id, tgt_id, src_slot=None, dst_slot=input_slot)
 
         logger.debug(f"Added [{tip_boundary.b_id}] as a tip boundary to element [{tgt_id}].")
 
-        return self
+        return tip_boundary.b_id
 
     def connect_elements(
             self,
@@ -170,24 +171,7 @@ class MBS:
 
         return self
 
-    def _validate_graph(self, graph: nx.DiGraph) -> nx.DiGraph:
-        # TODO: fix this
-        # Check that the graph is connected
-        if not nx.is_connected(graph.to_undirected()):
-            err_msg = "Invalid topology. There are disconnected components. Check your elements and links."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        # Check that all elements can flow to the root
-        pass
-        # Should probably detect if the root is looped
-        pass
-
-        logger.info(f"Validated system graph.")
-
-        return graph
-
-    def cut_connection(self, connection: Iterable[ElemLike]) -> nx.DiGraph:
+    def cut_connection(self, connection: Iterable[ElemLike]) -> MBS:
 
         src_id, dst_id = map(self._resolve_elem_id, connection)
         log_prefix = f"Cutting [{src_id}] -/> [{dst_id}]:"
@@ -202,118 +186,109 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        if self.graph.out_degree(src_id) == 1:
-            logger.warning(f"{log_prefix} source element [{src_id}] has only one output. Cutting this connection "
-                           f"will isolate the source element and its upstream branches.")
+        # Grab the edge data now that we know that the edge exists
+        src_slot = self.graph[src_id][dst_id]['src_slot']
+        dst_slot = self.graph[src_id][dst_id]['dst_slot']
 
-            input_bound = Boundary()
-            cut = CutPoint()
+        if self.graph.out_degree(src_id) == 1:
+            # Check if node is in a directed cycle
+            in_cycle = False
+            for scc in nx.strongly_connected_components(self.graph):
+                if src_id in scc and len(scc) > 1:
+                    in_cycle = True
+            if in_cycle:
+                try:
+                    b_id1 = self.add_root(np.full(12, None), self.elements[src_id], src_slot)
+                    b_id2 = self.add_tip(np.full(12, None), self.elements[dst_id], dst_slot)
+                    # Cutting a connection in this case generates a new INPUT and OUTPUT.
+                    # No C sign matrix will be needed. Both state vectors are equal
+                    cut = CutPoint(b_id1, b_id2, False)
+                    logger.debug(f"{log_prefix} cut closed loop. Created new root [{b_id1}] and tip [{b_id2}].")
+                except ValueError:
+                    err_msg = f"{log_prefix} failed to cut the connection. Could not create new root."
+                    logger.error(err_msg)
+                    raise ValueError(err_msg)
+            else:
+                err_msg = (f"{log_prefix} source element [{src_id}] has only one output. Cutting this connection "
+                           f"would isolate the downstream elements.")
+                logger.error(err_msg)
+                raise ValueError(err_msg)
 
         else:
-            pass
+            b_id1 = self.add_tip(np.full(12, None), self.elements[src_id], src_slot)
+            b_id2 = self.add_tip(np.full(12, None), self.elements[dst_id], dst_slot)
+            # Cutting a connection in this case generates two new INPUT tips/boundaries.
+            # C sign matrix will be needed
+            cut = CutPoint(b_id1, b_id2)
+            logger.debug(f"{log_prefix} cut connection. Created new tips [{b_id1}] and [{b_id2}].")
 
-        # Cutting the specified connections and return the resulting graph
-        new_graph = self._execute_cuts(self.graph, cut_pairs)
-        logger.info(f"Cut {len(cut_pairs)} connections as specified by the user.")
-        return new_graph
+        # clean up the old edge and save the cutting point relation
+        self._cut_points.append(cut)
+        self.graph.remove_edge(src_id, dst_id)
+        logger.debug(f"{log_prefix}: old edge removed.")
+        logger.info(f"{log_prefix} done.")
 
-    def cut_closed_loop(self, connection: Tuple[ElemLike, ElemLike]) -> nx.DiGraph:
-        """
-        Cutting a closed loop at the designated connection. Creating 2 new boundaries of which on is the new root.
-        :param connection:
-        :return:
-        """
-        src_id, dst_id = map(self._resolve_elem_id, connection)
-        log_prefix = f"Cutting connection [{src_id}] -> [{dst_id}]:"
-
-        if (src_id, dst_id) not in self.graph.edges:
-            logger.error(f"{log_prefix} specified connection does not exist in the system.")
-            return self.graph
-
-        # Create new root boundary
-        new_root_id = f"{src_id}_to_{dst_id}_cut"
-        new_root = Boundary(b_id=new_root_id, free_dofs=list(range(6)), fixed_dofs=[])
-        self._root = new_root
-        self._boundaries[new_root_id] = new_root
-        self.graph.add_node(new_root_id)
-
-        # Cut the connection and link the new root to the source and destination elements
-        cut_pairs = [(src_id, dst_id), (dst_id, new_root_id), (new_root_id, src_id)]
-        new_graph = self._execute_cuts(self.graph, cut_pairs)
-
-        logger.info(f"Cut closed loop at connection [{src_id}] -> [{dst_id}]. "
-                    f"Created new root boundary [{new_root_id}].")
-
-        return new_graph
-
+        return self
 
     def _find_cuts(self, graph: nx.DiGraph) -> List[Tuple[Hashable, Hashable]]:
         # Identify and cut connections between elements to get a tree system
-        # At this step a SINGLE desired root is assumed to be selected
-        cut_pairs = []
 
-        # Handle the case of DIVERGING NODES (out_degree > 1)
-        #   Cutting a connection in this case generates two new INPUT tips/boundaries.
-        #   C sign matrix will be needed
-        #   Branching nodes are body nodes with out_degree > 1
-        diverging_nodes = [n for n in graph if graph.out_degree(n) > 1]
-        for dnode in diverging_nodes:
-            neighbors = list(graph.successors(dnode))
-            # Each element can only have one output
-            # We can choose to only keep the output with the shortest path to root
-            preserved = nx.shortest_path(graph, source=dnode, target=self._root.b_id)[1]
-            for n in neighbors:
-                if n != preserved:
-                    cut_pairs.append((dnode, n))
-
-        # Handle the potential closed-loop containing the ROOT
-        #   Cutting a connection in this case generates a new INPUT and OUTPUT.
-        #   No C sign matrix will be needed. Both state vectors are equal
-        if graph.out_degree(self._root_eid) > 0:
-            neighbors = list(graph.successors(self._root_eid))
-            for n in neighbors:
-                cut_pairs.append((self._root_eid, n))
-
-        # Return edges to be cut
-        logger.info(f"Found {len(cut_pairs)} cuts to be made.")
-        for i, (src, dst) in enumerate(cut_pairs):
-            logger.debug(f"Cut {i}: {src}->{dst}")
-
-        return cut_pairs
-
-    @staticmethod
-    def _execute_cuts(
-            graph: nx.DiGraph,
-            cut_pairs: Iterable[Tuple[Hashable, Hashable]]
-    ) -> nx.DiGraph:
-        new_graph = graph.copy()
-
-        for (src, dst) in cut_pairs:
-            new_graph.remove_edge(src, dst)
-
-        return new_graph
-
-
-    def make_tree(self, cut_connections: List[Tuple[Hashable, Hashable]]) -> MBS:
-        # Check that expected tips and root have been defined
-        # TODO: offer auto root and tip resolution
-        if self._root_eid is None:
+        # At this step a valid and unique root must be selected
+        if self._root is None:
             err_msg = "Root element not identified."
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        # First, execute user-defined cuts
-        # Then cut the remaining connections to get a tree system
+        connections_to_cut = []
+        # Handle diverging nodes (out_degree > 1)
+        diverging_nodes = [n for n in graph if graph.out_degree(n) > 1]
+        for dnode in diverging_nodes:
+            succs = list(graph.successors(dnode))
+            # Each element can only have one output
+            # We can choose to only keep the output with the shortest path to root
+            preserved = nx.shortest_path(graph, source=dnode, target=self._root.b_id)[1]
+            for n in succs:
+                if n != preserved:
+                    connections_to_cut.append((dnode, n))
 
-    def _transfer_path(self, tree: nx.DiGraph, source_eid: Hashable, target_eid: Hashable) -> np.ndarray:
-        # Get the path from the tip to the root in the tree
-        path = nx.shortest_path(tree, source=source_eid, target=target_eid)
+        # Return edges to be cut
+        logger.info(f"Found {len(connections_to_cut)} cuts to be made.")
+        for i, (src, dst) in enumerate(connections_to_cut):
+            logger.debug(f"Cut {i}: {src}->{dst}")
+
+        return connections_to_cut
+
+    def make_tree(self) -> MBS:
+        log_prefix = "Making system tree:"
+
+        logger.debug(f"{log_prefix}: auto resolving edges to cut.")
+        c2c = self._find_cuts(self.graph)
+        logger.debug(f"{log_prefix}: cutting edges.")
+        for connection in c2c:
+            self.cut_connection(connection)
+
+        # Check that we have a correct tree system
+        # The actual check needs to be run on a reversed view of the graph since the root is the sink, not the source
+        if not nx.is_arborescence(nx.reverse_view(self.graph)):
+            err_msg = f"{log_prefix} invalid topology. Could not transform system into a tree."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        logger.info(f"{log_prefix}: validated topology.")
+
+        return self
+
+    def _transfer_path(self, tree: nx.DiGraph, source_id: Hashable, target_id: Hashable) -> np.ndarray:
+        # Get transfer matrix from the output state vector of the source to the input vec
+        path = nx.shortest_path(tree, source=source_id, target=target_id)
+        segments = {}
+        for i in range(len(path)-1):
+            n1, n2 = path[i], path[i+1]
+            if n2 in self.elements:
+                segments[(n1, n2)] = tree[n1][n2]['dst_slot']
 
         # Walk through the branches and pre-multiply along the way
-        transfer_matrix = self.elements[source_eid].U
-        prev_node = source_eid
-        for node in path[1:]:
-            pass
+        transfer_matrix = np.empty((12,12))
 
         return transfer_matrix
 
