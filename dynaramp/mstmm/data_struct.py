@@ -3,7 +3,7 @@ import logging
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, List, Hashable
+from typing import Dict, Hashable
 
 import numpy as np
 
@@ -38,18 +38,26 @@ class Element:
         for s in self.slots:
             r = self.slots[s]  # position of slot relative to the main input
             # H extraction
-            self.H_ext = np.zeros((6, 12))
-            self.H_ext[:, :6] = np.identity(6)
+            self.H_ext = np.block([
+                np.identity(6), np.zeros((6, 6))
+             ])
             # U extraction
-            self.U_exts[s] = np.zeros((12, 12))
-            ublock = np.identity(6)
-            ublock[3:, :3] = skew_sym_mat(r)
-            self.U_exts[s][6:, 6:] = ublock
+            ublock = np.block([
+                [np.identity(3), np.zeros((3, 3))],
+                [skew_sym_mat(r), np.identity(3)]
+            ])
+            self.U_exts[s] = np.block([
+                [np.zeros((6, 6)), np.zeros((6, 6))],
+                [np.zeros((6, 6)), ublock]
+            ])
             # H incidence
-            self.H_incs[s] = np.zeros((6, 12))
-            hblock = np.identity(6)
-            hblock[:3, 3:] = skew_sym_mat(r)
-            self.H_incs[s][:, :6] = hblock
+            hblock = np.block([
+                [np.identity(3), skew_sym_mat(r)],
+                [np.zeros((3, 3)), np.identity(3)]
+            ])
+            self.H_incs[s] = np.block([
+                hblock, np.zeros((6, 6))
+            ])
 
 
 @dataclass

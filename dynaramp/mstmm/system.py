@@ -45,10 +45,12 @@ class MBS:
         raise TypeError(err_msg)
 
     def add_elements(self, elems: Element | Iterable[Element]) -> MBS:
-        if not isinstance(elems, Iterable):
-            elems = (elems,)
+        if isinstance(elems, Iterable):
+            elem_iterable = elems
+        else:
+            elem_iterable = (elems,)
 
-        for elem in elems:
+        for elem in elem_iterable:
             # Strictly typed interface. Check that the element is an instance of Element or its subclasses
             if not isinstance(elem, Element):
                 err_msg = (f"Provided element must be an instance of Element or its subclasses. "
@@ -278,20 +280,89 @@ class MBS:
 
         return self
 
-    def _transfer_path(self, tree: nx.DiGraph, source_id: Hashable, target_id: Hashable) -> np.ndarray:
-        # Get transfer matrix from the output state vector of the source to the input vec
-        path = nx.shortest_path(tree, source=source_id, target=target_id)
-        segments = {}
-        for i in range(len(path)-1):
-            n1, n2 = path[i], path[i+1]
-            if n2 in self.elements:
-                segments[(n1, n2)] = tree[n1][n2]['dst_slot']
+    def _transfer_mat_along_path(self, path: Iterable[Hashable]) -> np.ndarray:
+        # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
+        path_elems = list(path)
 
-        # Walk through the branches and pre-multiply along the way
-        transfer_matrix = np.empty((12,12))
+        u_chain = np.identity(12)
 
-        return transfer_matrix
+        for i in range(len(path_elems) - 1):
+            e1, e2 = path_elems[i], path_elems[i + 1]
 
-    def _geometric_relation(self):
-        pass
+            if e2 in self._boundaries:
+                continue  # we've reached the root. Boundaries don't define a transfer matrix.
 
+            dst_slot = self.graph[e1][e2]['dst_slot']
+            # Here we apply the transfer matrix for the element e2 based on its input slot (dst_slot)
+            if dst_slot is None:
+                u_chain = self.elements[e2].U @ u_chain
+            else:
+                u_chain = self.elements[e2].U_exts[dst_slot] @ u_chain
+
+        return u_chain
+
+    def _geometric_mat(self, tip_id: Hashable, mie_id: Hashable) -> np.ndarray:
+        try:
+            path = nx.shortest_path(self.graph, source=tip_id, target=mie_id)[:-1]
+            u_chain = self._transfer_mat_along_path(path)
+            dst_slot = self.graph[path[-1]][mie_id]['dst_slot']
+            if dst_slot is None:
+                g_mat = - self.elements[mie_id].H_ext @ u_chain
+            else:
+                g_mat = self.elements[mie_id].H_incs[dst_slot] @ u_chain
+            return g_mat
+        except nx.NetworkXNoPath:
+            return np.zeros((6, 12))
+
+    def overall_transfer(self) -> np.ndarray:
+        # Sort the boundaries -> [root, tip1, tip2, ...]
+        tips = [b for b in self._boundaries.values() if b is not self._root]
+
+        t_mats = []
+        for tip in tips:
+            try:
+                path = nx.shortest_path(self.graph, source=tip.b_id, target=self._root.b_id)
+                t_mats.append(self._transfer_mat_along_path(path))
+            except nx.NetworkXNoPath:
+                raise ValueError(f"No path found from tip [{tip.b_id}] to root [{self._root.b_id}].")
+
+        multi_input_elems = [e_id for e_id in self.elements if self.graph.in_degree(e_id) > 1]
+        g_cols = []
+        for tip in tips:
+            col = []
+            for mie_id in multi_input_elems:
+                col.append(self._geometric_mat(tip.b_id, mie_id))
+            g_cols.append(np.vstack(col))
+
+        # Condense columns at cut points
+        for cut in self._cut_points:
+            # Find the index of the cut's tip boundaries in the tip list
+            try:
+                idx1 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id1)
+                idx2 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id2)
+            except StopIteration:
+                raise ValueError(f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips.")
+
+            t_mats[idx1] += t_mats[idx2] @ cut.mat
+            t_mats.pop(idx2)
+
+            g_cols[idx1] += g_cols[idx2] @ cut.mat
+            g_cols.pop(idx2)
+
+            tips.pop(idx2)
+
+        t_block = np.hstack(t_mats)
+        g_block = np.hstack(g_cols)
+
+        u_all = np.block([
+            [- np.identity(12), t_block],
+            [np.zeros((g_block.shape[0], 12)), g_block],
+        ])
+
+        z_all = np.hstack([self._root.state_vector] + [b.state_vector for b in tips])
+
+        # Eliminate columns corresponding to known zero boundary conditions
+        mask = [r!=0 for r in z_all]
+        u_red = u_all[:, mask]
+
+        return u_red
