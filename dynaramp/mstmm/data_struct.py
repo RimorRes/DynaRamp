@@ -15,15 +15,9 @@ logger = logging.getLogger(__name__)
 type ElemLike = Hashable | Element
 
 
-class ElementType(Enum):
-    BODY = auto()
-    HINGE = auto()
-
-
 @dataclass
 class Element:
     e_id: Hashable
-    etype: ElementType
     U: np.ndarray
     slots: Dict[Hashable, np.ndarray]  # positions of slots relative to the main input
 
