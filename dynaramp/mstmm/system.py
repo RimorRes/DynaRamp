@@ -6,7 +6,7 @@ from typing import Tuple, List, Dict, Iterable, Hashable
 import networkx as nx
 import numpy as np
 
-from .data_struct import Element, ElemLike, Boundary, CutPoint
+from .structs import Element, ElemLike, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,6 @@ class MBS:
 
     def __init__(self):
         self.elements: Dict[Hashable, Element] = {}
-        self._populated_slots: Dict[Hashable, List[int | None]] = {}
 
         self._root: Boundary | None = None
         self._boundaries: Dict[Hashable, Boundary] = {}
@@ -73,9 +72,9 @@ class MBS:
 
         tgt_id = self._resolve_elem_id(target_elem)
         if tgt_id not in self.elements:
-            err_msg = f"Cannot add root: target element [{tgt_id}] is missing from the system. Add it."
+            err_msg = f"Cannot add root: target element [{tgt_id}] is missing from the system."
             logger.error(err_msg)
-            raise ValueError(err_msg)
+            raise KeyError(err_msg)
 
         root_boundary = Boundary(b_id=f"{tgt_id}.{output_slot},0", state_vector=boundary_sv)
         self._root = root_boundary
@@ -91,9 +90,9 @@ class MBS:
         # NO SLOT OVERWRITE PROTECTION
         tgt_id = self._resolve_elem_id(target_element)
         if tgt_id not in self.elements:
-            err_msg = f"Cannot add tip: target element [{tgt_id}] is missing from the system. Add it."
+            err_msg = f"Cannot add tip: target element [{tgt_id}] is missing from the system."
             logger.error(err_msg)
-            raise ValueError(err_msg)
+            raise KeyError(err_msg)
 
         tip_boundary = Boundary(b_id=f"{tgt_id}.{input_slot},0", state_vector=boundary_sv)
         self._boundaries[tip_boundary.b_id] = tip_boundary
@@ -108,8 +107,8 @@ class MBS:
             self,
             src: ElemLike,
             dst: ElemLike,
-            src_slot: int,
-            dst_slot: int | None = None,
+            src_slot: Hashable,
+            dst_slot: Hashable = None,
     ) -> MBS:
 
         src_id = self._resolve_elem_id(src)
@@ -117,14 +116,13 @@ class MBS:
         log_prefix = f"[{src_id}] -> [{dst_id}]:"
 
         # Prevent creating an invalid link referencing non-existent elements
-        if src_id not in self.elements:
-            err_msg = f"{log_prefix} source element [{src_id}] is missing from the system. Add it."
+        try:
+            src_elem = self.elements[src_id]
+            dst_elem = self.elements[dst_id]
+        except KeyError:
+            err_msg = f"{log_prefix} element(s) missing from the system."
             logger.error(err_msg)
-            raise ValueError(err_msg)
-        if dst_id not in self.elements:
-            err_msg = f"{log_prefix} target element [{dst_id}] is missing from the system. Add it."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
+            raise KeyError(err_msg)
 
         # Prevent self-loops
         if src_id == dst_id:
@@ -136,39 +134,40 @@ class MBS:
             logger.warning(f"{log_prefix} parallel edges between the same elements are not allowed.")
             return self
 
-        # For type-dispatch, retrieve the stored source and target elements
-        # We now know the keys exist
-        src_elem = self.elements[src_id]
-        dst_elem = self.elements[dst_id]
         # Specific dispatching based on selected slot
-
         # SOURCE ELEMENT
-        if src_slot in self._populated_slots[src_id]:
-            err_msg = f"{log_prefix} slot [{src_slot}] of element [{src_id}] is already populated."
+        if src_slot is None:
+            err_msg = f"{log_prefix} slot [MAIN] cannot be used as an output."
             logger.error(err_msg)
             raise ValueError(err_msg)
-        if not src_slot in src_elem.slots:  # Also handles the invalid case of using the None slot as an output
+        try:
+            if src_elem.slot_occupancy[src_slot] is not None:
+                err_msg = f"{log_prefix} slot [{src_slot}] of element [{src_id}] is already populated."
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+        except KeyError:  # Undefined slots end up here
             err_msg = (f"{log_prefix} slot [{src_slot}] is not defined for the source element "
                        f"or cannot be used as an output.")
             logger.error(err_msg)
-            raise ValueError(err_msg)
+            raise KeyError(err_msg)
 
         # DESTINATION ELEMENT
-        if dst_slot in self._populated_slots[dst_id]:
-            err_msg = (f"{log_prefix} slot [{"MAIN" if dst_slot is None else dst_slot}] "
-                         f"of element [{dst_id}] is already populated.")
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-        if dst_slot is not None and dst_slot not in dst_elem.slots:
+        try:
+            if dst_elem.slot_occupancy[dst_slot] is not None:
+                err_msg = (f"{log_prefix} slot [{"MAIN" if dst_slot is None else dst_slot}] "
+                           f"of element [{dst_id}] is already populated.")
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+        except KeyError:
             err_msg = f"{log_prefix} slot [{dst_slot}] is not defined for the destination element."
             logger.error(err_msg)
-            raise ValueError(err_msg)
+            raise KeyError(err_msg)
 
         # After both elements are validated, they can be linked
         logger.debug(f"{log_prefix} linking from source slot [{src_slot}] "
                      f"to destination slot [{"MAIN" if dst_slot is None else dst_slot}].")
-        self._populated_slots[src_id].append(src_slot)
-        self._populated_slots[dst_id].append(dst_slot)
+        src_elem.slot_occupancy[src_slot] = 'output'
+        dst_elem.slot_occupancy[dst_slot] = 'input'
         self.graph.add_edge(src_id, dst_id, src_slot=src_slot, dst_slot=dst_slot)
 
         return self
@@ -178,19 +177,18 @@ class MBS:
         src_id, dst_id = map(self._resolve_elem_id, connection)
         log_prefix = f"Cutting [{src_id}] -/> [{dst_id}]:"
 
-        if (src_id, dst_id) not in self.graph.edges:
+        try:
+            src_slot = self.graph[src_id][dst_id]['src_slot']
+            dst_slot = self.graph[src_id][dst_id]['dst_slot']
+        except KeyError:
             err_msg = f"{log_prefix} specified connection does not exist in the system."
             logger.error(err_msg)
-            raise ValueError(err_msg)
+            raise KeyError(err_msg)
 
         if src_id in self._boundaries or dst_id in self._boundaries:
             err_msg = f"{log_prefix} cannot cut a connection with a boundary."
             logger.error(err_msg)
             raise ValueError(err_msg)
-
-        # Grab the edge data now that we know that the edge exists
-        src_slot = self.graph[src_id][dst_id]['src_slot']
-        dst_slot = self.graph[src_id][dst_id]['dst_slot']
 
         if self.graph.out_degree(src_id) == 1:
             # Check if node is in a directed cycle
@@ -276,11 +274,13 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
+        # TODO: check if all nodes are traversed
+
         logger.info(f"{log_prefix}: validated topology.")
 
         return self
 
-    def _transfer_mat_along_path(self, path: Iterable[Hashable]) -> np.ndarray:
+    def _transfer_mat_along_path(self, path: Iterable[Hashable], omega: float) -> np.ndarray:
         # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
         path_elems = list(path)
 
@@ -295,26 +295,26 @@ class MBS:
             dst_slot = self.graph[e1][e2]['dst_slot']
             # Here we apply the transfer matrix for the element e2 based on its input slot (dst_slot)
             if dst_slot is None:
-                u_chain = self.elements[e2].U @ u_chain
+                u_chain = self.elements[e2].u(omega) @ u_chain
             else:
-                u_chain = self.elements[e2].U_exts[dst_slot] @ u_chain
+                u_chain = self.elements[e2].u_exts[dst_slot] @ u_chain
 
         return u_chain
 
-    def _geometric_mat(self, tip_id: Hashable, mie_id: Hashable) -> np.ndarray:
+    def _geometric_mat(self, tip_id: Hashable, mie_id: Hashable, omega: float) -> np.ndarray:
         try:
             path = nx.shortest_path(self.graph, source=tip_id, target=mie_id)[:-1]
-            u_chain = self._transfer_mat_along_path(path)
+            u_chain = self._transfer_mat_along_path(path, omega)
             dst_slot = self.graph[path[-1]][mie_id]['dst_slot']
             if dst_slot is None:
-                g_mat = - self.elements[mie_id].H_ext @ u_chain
+                g_mat = - self.elements[mie_id].h_ext @ u_chain
             else:
-                g_mat = self.elements[mie_id].H_incs[dst_slot] @ u_chain
+                g_mat = self.elements[mie_id].h_incs[dst_slot] @ u_chain
             return g_mat
         except nx.NetworkXNoPath:
             return np.zeros((6, 12))
 
-    def overall_transfer(self) -> np.ndarray:
+    def overall_transfer(self, omega) -> np.ndarray:
         # Sort the boundaries -> [root, tip1, tip2, ...]
         tips = [b for b in self._boundaries.values() if b is not self._root]
 
@@ -322,7 +322,7 @@ class MBS:
         for tip in tips:
             try:
                 path = nx.shortest_path(self.graph, source=tip.b_id, target=self._root.b_id)
-                t_mats.append(self._transfer_mat_along_path(path))
+                t_mats.append(self._transfer_mat_along_path(path, omega))
             except nx.NetworkXNoPath:
                 raise ValueError(f"No path found from tip [{tip.b_id}] to root [{self._root.b_id}].")
 
@@ -331,7 +331,7 @@ class MBS:
         for tip in tips:
             col = []
             for mie_id in multi_input_elems:
-                col.append(self._geometric_mat(tip.b_id, mie_id))
+                col.append(self._geometric_mat(tip.b_id, mie_id, omega))
             g_cols.append(np.vstack(col))
 
         # Condense columns at cut points
@@ -364,5 +364,6 @@ class MBS:
         # Eliminate columns corresponding to known zero boundary conditions
         mask = [r!=0 for r in z_all]
         u_red = u_all[:, mask]
+        # TODO: Deal with non-zero known boundaries
 
         return u_red
