@@ -3,35 +3,32 @@ import logging
 
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Dict, Hashable
+from typing import Dict
 
 import numpy as np
 
-from dynaramp.vecmath import skew_sym_mat
+from ..vecmath import skew_sym_mat
+from ..types import EntityID, Vector, Matrix
 
 
 logger = logging.getLogger(__name__)
 
-type ElemLike = Hashable | Element
-
 
 @dataclass
 class Element(ABC):
-    e_id: Hashable
-    slots_pos: Dict[Hashable, np.ndarray]  # positions of slots relative to the main input
+    e_id: EntityID
+    # positions of slots relative to the main input
+    slots_pos: Dict[EntityID, Vector]
 
-    slot_occupancy: Dict[Hashable, str | None] = field(init=False)  # 'input', 'output' or None
-    h_ext: np.ndarray = field(init=False)
-    u_exts: Dict[Hashable, np.ndarray] = field(init=False)
-    h_incs: Dict[Hashable, np.ndarray] = field(init=False)
+    h_ext: Matrix = field(init=False)
+    u_exts: Dict[EntityID, Matrix] = field(init=False)
+    h_incs: Dict[EntityID, Matrix] = field(init=False)
 
     def __post_init__(self):
-        self.slot_occupancy = {None: None} # init `None` a.k.a `MAIN` slot
         self.u_exts = {}
         self.h_incs = {}
         # Auto-generate the extraction and incidence matrices
         for s in self.slots_pos:
-            self.slot_occupancy[s] = None
 
             r = self.slots_pos[s]  # position of slot relative to the main input
             moment_block = np.block([
@@ -53,21 +50,21 @@ class Element(ABC):
             ])
 
     @abstractmethod
-    def u(self, omega: float) -> np.ndarray:
+    def u(self, omega: float, output_pos: Vector) -> Matrix:
         pass
 
 
 @dataclass
 class Boundary:
-    b_id: Hashable
-    state_vector: np.ndarray  # Numerical value for known boundary value, None for unknown
+    b_id: EntityID
+    state_vector: Vector # Numerical value for known boundary value, None for unknown
 
 @dataclass
 class CutPoint:
-    b_id1: Hashable
-    b_id2: Hashable
+    b_id1: EntityID
+    b_id2: EntityID
     sign_matrix: bool = True
-    mat: np.ndarray = field(init=False)
+    mat: Matrix = field(init=False)
 
     def __post_init__(self):
         self.mat = np.identity(12)

@@ -1,12 +1,13 @@
 from __future__ import annotations
 import logging
 
-from typing import Tuple, List, Dict, Iterable, Hashable
+from typing import Tuple, List, Dict, Iterable, Sequence, cast
 
 import networkx as nx
 import numpy as np
 
-from .structs import Element, ElemLike, Boundary, CutPoint
+from ..types import EntityID, ElemLike, Vector, Matrix
+from .structs import Element, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
 
@@ -14,30 +15,32 @@ logger = logging.getLogger(__name__)
 class MBS:
 
     def __init__(self):
-        self.elements: Dict[Hashable, Element] = {}
+        self.elements: Dict[EntityID, Element] = {}
+        self.slot_occupancy: Dict[EntityID, Dict[EntityID, str | None]] = {}  # 'input', 'output' or None
 
         self._root: Boundary | None = None
-        self._boundaries: Dict[Hashable, Boundary] = {}
+        self._boundaries: Dict[EntityID, Boundary] = {}
         self._cut_points: List[CutPoint] = []
 
         self.graph: nx.DiGraph = nx.DiGraph()
+        self._successor_in_tree = {}
 
     @staticmethod
-    def _resolve_elem_id(elem_or_eid: ElemLike) -> Hashable:
-        # Accept raw hashable IDs directly but prefer an object's explicit `e_id` attribute.
+    def _resolve_elem_id(elem_or_eid: ElemLike) -> EntityID:
+        # Accept raw IDs directly but prefer an object's explicit `e_id` attribute.
         if hasattr(elem_or_eid, "e_id"):
-            e_id = elem_or_eid.e_id
-            if isinstance(e_id, Hashable):
-                return e_id
-            err_msg = "Provided element has an unhashable `e_id`."
+            e_id_attr = elem_or_eid.e_id
+            if isinstance(e_id_attr, EntityID):
+                return cast(EntityID, cast(object, e_id_attr))
+            err_msg = f"Unsupported type {type(e_id_attr).__name__} for the provided element's `e_id`."
             logger.error(err_msg)
             raise TypeError(err_msg)
 
-        if isinstance(elem_or_eid, Hashable):
-            return elem_or_eid
+        if isinstance(elem_or_eid, EntityID):
+            return cast(EntityID, cast(object, elem_or_eid))
 
         err_msg = (
-            f"Expected a hashable element ID or Element-like object with an `e_id` attribute. "
+            f"Expected an entity ID or Element-like object with an `e_id` attribute. "
             f"Got {type(elem_or_eid).__name__}."
         )
         logger.error(err_msg)
@@ -59,11 +62,16 @@ class MBS:
 
             self.elements[elem.e_id] = elem
             self.graph.add_node(elem.e_id)
-            logger.debug(f"Adding element {elem.e_id} to the system.")
+            # Initializing slot status for the new element
+            occupancy_init: Dict[EntityID, str | None] = {None: None}  # init `None` a.k.a `MAIN` slot
+            for s in elem.slots_pos:
+                occupancy_init[s] = None
+            self.slot_occupancy[elem.e_id] = occupancy_init
+            logger.debug("Adding element %r to the system.", elem.e_id)
 
         return self
 
-    def add_root(self, boundary_sv: np.ndarray, target_elem: ElemLike, output_slot: int) -> Hashable:
+    def add_root(self, boundary_sv: Vector, target_elem: ElemLike, output_slot: int) -> EntityID:
         # NO SLOT OVERWRITE PROTECTION
         if self._root is not None:
             err_msg = f"Root boundary is already defined as [{self._root.b_id}]."
@@ -81,12 +89,13 @@ class MBS:
         self._boundaries[root_boundary.b_id] = root_boundary
         self.graph.add_node(root_boundary.b_id)
         self.graph.add_edge(tgt_id, root_boundary.b_id, src_slot=output_slot, dst_slot=None)
+        self.slot_occupancy[tgt_id][output_slot] = 'output'
 
         logger.debug(f"Added [{root_boundary.b_id}] as the root boundary to element [{tgt_id}].")
 
         return root_boundary.b_id
 
-    def add_tip(self, boundary_sv: np.ndarray, target_element: ElemLike, input_slot: int) -> Hashable:
+    def add_tip(self, boundary_sv: Vector, target_element: ElemLike, input_slot: int) -> EntityID:
         # NO SLOT OVERWRITE PROTECTION
         tgt_id = self._resolve_elem_id(target_element)
         if tgt_id not in self.elements:
@@ -98,6 +107,7 @@ class MBS:
         self._boundaries[tip_boundary.b_id] = tip_boundary
         self.graph.add_node(tip_boundary.b_id)
         self.graph.add_edge(tip_boundary.b_id, tgt_id, src_slot=None, dst_slot=input_slot)
+        self.slot_occupancy[tgt_id][input_slot] = 'input'
 
         logger.debug(f"Added [{tip_boundary.b_id}] as a tip boundary to element [{tgt_id}].")
 
@@ -107,8 +117,8 @@ class MBS:
             self,
             src: ElemLike,
             dst: ElemLike,
-            src_slot: Hashable,
-            dst_slot: Hashable = None,
+            src_slot: EntityID,
+            dst_slot: EntityID = None,
     ) -> MBS:
 
         src_id = self._resolve_elem_id(src)
@@ -116,10 +126,7 @@ class MBS:
         log_prefix = f"[{src_id}] -> [{dst_id}]:"
 
         # Prevent creating an invalid link referencing non-existent elements
-        try:
-            src_elem = self.elements[src_id]
-            dst_elem = self.elements[dst_id]
-        except KeyError:
+        if src_id not in self.elements or dst_id not in self.elements:
             err_msg = f"{log_prefix} element(s) missing from the system."
             logger.error(err_msg)
             raise KeyError(err_msg)
@@ -141,7 +148,7 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
         try:
-            if src_elem.slot_occupancy[src_slot] is not None:
+            if self.slot_occupancy[src_id][src_slot] is not None:
                 err_msg = f"{log_prefix} slot [{src_slot}] of element [{src_id}] is already populated."
                 logger.error(err_msg)
                 raise ValueError(err_msg)
@@ -153,7 +160,7 @@ class MBS:
 
         # DESTINATION ELEMENT
         try:
-            if dst_elem.slot_occupancy[dst_slot] is not None:
+            if self.slot_occupancy[dst_id][dst_slot] is not None:
                 err_msg = (f"{log_prefix} slot [{"MAIN" if dst_slot is None else dst_slot}] "
                            f"of element [{dst_id}] is already populated.")
                 logger.error(err_msg)
@@ -166,8 +173,8 @@ class MBS:
         # After both elements are validated, they can be linked
         logger.debug(f"{log_prefix} linking from source slot [{src_slot}] "
                      f"to destination slot [{"MAIN" if dst_slot is None else dst_slot}].")
-        src_elem.slot_occupancy[src_slot] = 'output'
-        dst_elem.slot_occupancy[dst_slot] = 'input'
+        self.slot_occupancy[src_id][src_slot] = 'output'
+        self.slot_occupancy[dst_id][dst_slot] = 'input'
         self.graph.add_edge(src_id, dst_id, src_slot=src_slot, dst_slot=dst_slot)
 
         return self
@@ -230,7 +237,7 @@ class MBS:
 
         return self
 
-    def _find_cuts(self, graph: nx.DiGraph) -> List[Tuple[Hashable, Hashable]]:
+    def _find_cuts(self, graph: nx.DiGraph) -> List[Tuple[EntityID, EntityID]]:
         # Identify and cut connections between elements to get a tree system
 
         # At this step a valid and unique root must be selected
@@ -243,7 +250,7 @@ class MBS:
         # Handle diverging nodes (out_degree > 1)
         diverging_nodes = [n for n in graph if graph.out_degree(n) > 1]
         for dnode in diverging_nodes:
-            succs = list(graph.successors(dnode))
+            succs = iter(graph[dnode])
             # Each element can only have one output
             # We can choose to only keep the output with the shortest path to root
             preserved = nx.shortest_path(graph, source=dnode, target=self._root.b_id)[1]
@@ -268,60 +275,90 @@ class MBS:
             self.cut_connection(connection)
 
         # Check that we have a correct tree system
-        # The actual check needs to be run on a reversed view of the graph since the root is the sink, not the source
+        # The actual check needs to be run on a reversed view of the graph since the root is the sink, not the source.
+        # is_arborescence allows for an in_degree <= 1,
+        # but with the current algorithm any element node with in_degree == 0 would be disconnected
+        # (only tips can verify this condition and be connected as they are not internal nodes);
+        # ergo this effectively validates the tree structure where every element has exactly one ouput.
         if not nx.is_arborescence(nx.reverse_view(self.graph)):
             err_msg = f"{log_prefix} invalid topology. Could not transform system into a tree."
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        # TODO: check if all nodes are traversed
+        # Buffer the output slot of all element nodes to speed up the transfer matrix calculations
+        for e in self.elements:
+            successor = next(iter(self.graph[e]))
+            out_slot = next(
+                slot
+                for slot, value in self.slot_occupancy[e].items()
+                if value == "output"
+            )
+            self._successor_in_tree[e] = {'output_slot': out_slot, 'next': successor}
 
         logger.info(f"{log_prefix}: validated topology.")
 
         return self
 
-    def _transfer_mat_along_path(self, path: Iterable[Hashable], omega: float) -> np.ndarray:
-        # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
-        path_elems = list(path)
+    def _resolve_branch_up_to(self, src: EntityID, tgt: EntityID) -> List[EntityID]:
+        """
+        Return path from src to tgt (excluding tgt)
+        :param src:
+        :param tgt:
+        :return:
+        """
+        path = []
+        node = src
+        while node != tgt:
+            path.append(node)
+            try:
+                node = self._successor_in_tree[node]['next']
+            except KeyError:
+                err_msg = f"No path found from [{src}] to [{tgt}]."
+                logger.error(err_msg)
+                raise ValueError(err_msg)
 
+        return path
+
+    def _transfer_mat_along_path(self, path: Sequence[EntityID], omega: float) -> Matrix:
+        # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
         u_chain = np.identity(12)
 
-        for i in range(len(path_elems) - 1):
-            e1, e2 = path_elems[i], path_elems[i + 1]
+        for i in range(len(path) - 1):
+            e1, e2 = path[i], path[i + 1]
 
-            if e2 in self._boundaries:
-                continue  # we've reached the root. Boundaries don't define a transfer matrix.
-
+            e2_elem = self.elements[e2]
             dst_slot = self.graph[e1][e2]['dst_slot']
             # Here we apply the transfer matrix for the element e2 based on its input slot (dst_slot)
             if dst_slot is None:
-                u_chain = self.elements[e2].u(omega) @ u_chain
+                output_slot = self._successor_in_tree[e2]['output_slot']
+                out_pos = e2_elem.slots_pos[output_slot]
+                u_chain = e2_elem.u(omega, out_pos) @ u_chain
             else:
-                u_chain = self.elements[e2].u_exts[dst_slot] @ u_chain
+                u_chain = e2_elem.u_exts[dst_slot] @ u_chain
 
         return u_chain
 
-    def _geometric_mat(self, tip_id: Hashable, mie_id: Hashable, omega: float) -> np.ndarray:
+    def _geometric_mat(self, tip_id: EntityID, mult_in_e_id: EntityID, omega: float) -> Matrix:
         try:
-            path = nx.shortest_path(self.graph, source=tip_id, target=mie_id)[:-1]
+            path = self._resolve_branch_up_to(src=tip_id, tgt=mult_in_e_id)
             u_chain = self._transfer_mat_along_path(path, omega)
-            dst_slot = self.graph[path[-1]][mie_id]['dst_slot']
+            dst_slot = self.graph[path[-1]][mult_in_e_id]['dst_slot']
             if dst_slot is None:
-                g_mat = - self.elements[mie_id].h_ext @ u_chain
+                g_mat = - self.elements[mult_in_e_id].h_ext @ u_chain
             else:
-                g_mat = self.elements[mie_id].h_incs[dst_slot] @ u_chain
+                g_mat = self.elements[mult_in_e_id].h_incs[dst_slot] @ u_chain
             return g_mat
         except nx.NetworkXNoPath:
             return np.zeros((6, 12))
 
-    def overall_transfer(self, omega) -> np.ndarray:
+    def overall_transfer(self, omega) -> Matrix:
         # Sort the boundaries -> [root, tip1, tip2, ...]
         tips = [b for b in self._boundaries.values() if b is not self._root]
 
         t_mats = []
         for tip in tips:
             try:
-                path = nx.shortest_path(self.graph, source=tip.b_id, target=self._root.b_id)
+                path = self._resolve_branch_up_to(src=tip.b_id, tgt=self._root.b_id)
                 t_mats.append(self._transfer_mat_along_path(path, omega))
             except nx.NetworkXNoPath:
                 raise ValueError(f"No path found from tip [{tip.b_id}] to root [{self._root.b_id}].")
@@ -330,8 +367,8 @@ class MBS:
         g_cols = []
         for tip in tips:
             col = []
-            for mie_id in multi_input_elems:
-                col.append(self._geometric_mat(tip.b_id, mie_id, omega))
+            for mult_in_e_id in multi_input_elems:
+                col.append(self._geometric_mat(tip.b_id, mult_in_e_id, omega))
             g_cols.append(np.vstack(col))
 
         # Condense columns at cut points

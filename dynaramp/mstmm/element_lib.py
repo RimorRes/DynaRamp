@@ -1,12 +1,13 @@
 from __future__ import annotations
 import logging
 
-from typing import Tuple, Dict, Hashable
+from typing import Dict
 
 import numpy as np
 
 from .structs import Element
-from dynaramp.vecmath import skew_sym_mat
+from ..vecmath import skew_sym_mat
+from ..types import EntityID, Vector, Matrix
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +17,9 @@ class RigidBody(Element):
     def __init__(self,
                  e_id,
                  mass: float,
-                 inertia: np.ndarray,
-                 com: Tuple[float, float, float],
-                 slot_coords: Dict[Hashable, Tuple[float, float, float]],
+                 inertia: Matrix,
+                 com: Vector,
+                 slot_coords: Dict[EntityID, Vector],
                  ):
         slots_pos = {s_id: np.array(pos) for s_id, pos in slot_coords.items()}
         super().__init__(e_id, slots_pos)
@@ -29,15 +30,8 @@ class RigidBody(Element):
         r = - self.com_pos
         self.j = inertia + mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
 
-    def u(self, omega: float) -> np.ndarray:
-        output_slot = next(
-            slot
-            for slot, value in self.slot_occupancy.items()
-            if value == "output"
-        )
-        out_pos = self.slots_pos[output_slot]
-
-        l_io = skew_sym_mat(out_pos)
+    def u(self, omega: float, output_pos: Vector) -> Matrix:
+        l_io = skew_sym_mat(output_pos)
         l_ic = skew_sym_mat(self.com_pos)
         l_co = l_io - l_ic
 

@@ -3,11 +3,13 @@ import logging
 
 import numpy as np
 
+from .types import Vector, Matrix
+
 
 logger = logging.getLogger(__name__)
 
 
-def skew_sym_mat(vec: np.ndarray) -> np.ndarray:
+def skew_sym_mat(vec: Vector) -> Matrix:
     """
     Returns the skew symmetric matrix of a 3D vector.
     The skew symmetric matrix is defined such that for any vector v,
@@ -17,6 +19,7 @@ def skew_sym_mat(vec: np.ndarray) -> np.ndarray:
     :return:
     """
 
+    vec = np.array(vec)
     # Verify shape
     match vec.shape:
         # "Flat" vector
@@ -33,7 +36,7 @@ def skew_sym_mat(vec: np.ndarray) -> np.ndarray:
                 [-vec[1, 0], vec[0, 0], 0]
             ])
         case _:
-            err_msg = "Input vector must be of shape (3,) or (3,1). Got shape {vec.shape}"
+            err_msg = f"Input vector must be of shape (3,) or (3,1). Got shape {vec.shape}"
             logger.error(err_msg)
             raise ValueError(err_msg)
 
