@@ -1,12 +1,12 @@
 from __future__ import annotations
 import logging
 
-from typing import Tuple, List, Dict, Iterable, Sequence, cast
+from typing import Tuple, List, Dict, Iterable, Sequence
 
 import networkx as nx
 import numpy as np
 
-from ..common_types import EntityID, Vector, Matrix
+from ..common_types import EntityID, is_entity_id, Vector, Matrix
 from .structs import Element, ElemLike, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
@@ -30,14 +30,14 @@ class MBS:
         # Accept raw IDs directly but prefer an object's explicit `e_id` attribute.
         if hasattr(elem_or_eid, "e_id"):
             e_id_attr = elem_or_eid.e_id
-            if isinstance(e_id_attr, EntityID):
-                return cast(EntityID, cast(object, e_id_attr))
+            if is_entity_id(e_id_attr):
+                return e_id_attr
             err_msg = f"Unsupported type {type(e_id_attr).__name__} for the provided element's `e_id`."
             logger.error(err_msg)
             raise TypeError(err_msg)
 
-        if isinstance(elem_or_eid, EntityID):
-            return cast(EntityID, cast(object, elem_or_eid))
+        if is_entity_id(elem_or_eid):
+            return elem_or_eid
 
         err_msg = (
             f"Expected an entity ID or Element-like object with an `e_id` attribute. "
@@ -118,7 +118,7 @@ class MBS:
             src: ElemLike,
             dst: ElemLike,
             src_slot: EntityID,
-            dst_slot: EntityID | None = None,
+            dst_slot: EntityID | None = None
     ) -> MBS:
 
         src_id = self._resolve_elem_id(src)
@@ -352,6 +352,10 @@ class MBS:
             return np.zeros((6, 12))
 
     def overall_transfer(self, omega) -> Matrix:
+        if self._root is None:
+            err_msg = "Root element not identified."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
         # Sort the boundaries -> [root, tip1, tip2, ...]
         tips = [b for b in self._boundaries.values() if b is not self._root]
 
