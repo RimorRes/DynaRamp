@@ -6,8 +6,8 @@ from typing import Tuple, List, Dict, Iterable, Sequence, cast
 import networkx as nx
 import numpy as np
 
-from ..types import EntityID, ElemLike, Vector, Matrix
-from .structs import Element, Boundary, CutPoint
+from ..common_types import EntityID, Vector, Matrix
+from .structs import Element, ElemLike, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class MBS:
 
     def __init__(self):
         self.elements: Dict[EntityID, Element] = {}
-        self.slot_occupancy: Dict[EntityID, Dict[EntityID, str | None]] = {}  # 'input', 'output' or None
+        self.slot_occupancy: Dict[EntityID, Dict[EntityID | None, str | None]] = {}  # 'input', 'output' or None
 
         self._root: Boundary | None = None
         self._boundaries: Dict[EntityID, Boundary] = {}
@@ -63,7 +63,7 @@ class MBS:
             self.elements[elem.e_id] = elem
             self.graph.add_node(elem.e_id)
             # Initializing slot status for the new element
-            occupancy_init: Dict[EntityID, str | None] = {None: None}  # init `None` a.k.a `MAIN` slot
+            occupancy_init: Dict[EntityID | None, str | None] = {None: None}  # init `None` a.k.a `MAIN` slot
             for s in elem.slots_pos:
                 occupancy_init[s] = None
             self.slot_occupancy[elem.e_id] = occupancy_init
@@ -118,7 +118,7 @@ class MBS:
             src: ElemLike,
             dst: ElemLike,
             src_slot: EntityID,
-            dst_slot: EntityID = None,
+            dst_slot: EntityID | None = None,
     ) -> MBS:
 
         src_id = self._resolve_elem_id(src)

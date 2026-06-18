@@ -8,10 +8,13 @@ from typing import Dict
 import numpy as np
 
 from ..vecmath import skew_sym_mat
-from ..types import EntityID, Vector, Matrix
+from ..common_types import EntityID, Vector, Matrix
 
 
 logger = logging.getLogger(__name__)
+
+
+type ElemLike = EntityID | Element
 
 
 @dataclass
@@ -58,6 +61,7 @@ class Element(ABC):
 class Boundary:
     b_id: EntityID
     state_vector: Vector # Numerical value for known boundary value, None for unknown
+
 
 @dataclass
 class CutPoint:
