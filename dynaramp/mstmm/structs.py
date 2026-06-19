@@ -60,7 +60,7 @@ class Element(ABC):
 @dataclass
 class Boundary:
     b_id: EntityID
-    state_vector: Vector # Numerical value for known boundary value, None for unknown
+    state_vector: Vector  # Numerical value for known boundary value, None for unknown
 
 
 @dataclass
@@ -74,6 +74,3 @@ class CutPoint:
         self.mat = np.identity(12)
         if self.sign_matrix:
             self.mat[6:, 6:] *= -1
-
-
-

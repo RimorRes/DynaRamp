@@ -29,7 +29,7 @@ def skew_sym_mat(vec: Vector) -> Matrix:
                 [vec[2], 0, -vec[0]],
                 [-vec[1], vec[0], 0]
             ])
-        case (3,1):
+        case (3, 1):
             ssv = np.array([
                 [0, -vec[2, 0], vec[1, 0]],
                 [vec[2, 0], 0, -vec[0, 0]],

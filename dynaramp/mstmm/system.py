@@ -351,7 +351,7 @@ class MBS:
         except nx.NetworkXNoPath:
             return np.zeros((6, 12))
 
-    def overall_transfer(self, omega) -> Matrix:
+    def overall_transfer(self, omega) -> Tuple[Matrix, Vector, Vector]:
         if self._root is None:
             err_msg = "Root element not identified."
             logger.error(err_msg)
@@ -402,9 +402,14 @@ class MBS:
 
         z_all = np.hstack([self._root.state_vector] + [b.state_vector for b in tips])
 
-        # Eliminate columns corresponding to known zero boundary conditions
-        mask = [r!=0 for r in z_all]
-        u_red = u_all[:, mask]
-        # TODO: Deal with non-zero known boundaries
+        # Handle known boundary conditions
+        known_mask = np.array([x is not None for x in z_all])
+        nonzero_mask = np.array([x != 0 for x in z_all]) & known_mask
+        # Eliminate columns corresponding to known zero boundary conditions...
+        u_red = u_all[:, ~ known_mask]
+        # ... and move columns corresponding to known non-zero boundary conditions into a load vector
+        u_nz = u_all[:, nonzero_mask]
+        z_nz = z_all[nonzero_mask]
+        f = u_nz @ z_nz
 
-        return u_red
+        return u_red, f, known_mask
