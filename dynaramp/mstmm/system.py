@@ -205,8 +205,8 @@ class MBS:
                     in_cycle = True
             if in_cycle:
                 try:
-                    b_id1 = self.add_root(np.full(12, None), self.elements[src_id], src_slot)
-                    b_id2 = self.add_tip(np.full(12, None), self.elements[dst_id], dst_slot)
+                    b_id1 = self.add_root(np.full(13, None), self.elements[src_id], src_slot)
+                    b_id2 = self.add_tip(np.full(13, None), self.elements[dst_id], dst_slot)
                     # Cutting a connection in this case generates a new INPUT and OUTPUT.
                     # No C sign matrix will be needed. Both state vectors are equal
                     cut = CutPoint(b_id1, b_id2, False)
@@ -222,8 +222,8 @@ class MBS:
                 raise ValueError(err_msg)
 
         else:
-            b_id1 = self.add_tip(np.full(12, None), self.elements[src_id], src_slot)
-            b_id2 = self.add_tip(np.full(12, None), self.elements[dst_id], dst_slot)
+            b_id1 = self.add_tip(np.full(13, None), self.elements[src_id], src_slot)
+            b_id2 = self.add_tip(np.full(13, None), self.elements[dst_id], dst_slot)
             # Cutting a connection in this case generates two new INPUT tips/boundaries.
             # C sign matrix will be needed
             cut = CutPoint(b_id1, b_id2)
@@ -321,20 +321,21 @@ class MBS:
 
     def _transfer_mat_along_path(self, path: Sequence[EntityID], omega: float) -> Matrix:
         # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
-        u_chain = np.identity(12)
+        u_chain = np.identity(13)
 
         for i in range(len(path) - 1):
             e1, e2 = path[i], path[i + 1]
 
             e2_elem = self.elements[e2]
             dst_slot = self.graph[e1][e2]['dst_slot']
+            # Retrieve the position of the output
+            output_slot = self._successor_in_tree[e2]['output_slot']
+            out_pos = e2_elem.slots_pos[output_slot]
             # Here we apply the transfer matrix for the element e2 based on its input slot (dst_slot)
             if dst_slot is None:
-                output_slot = self._successor_in_tree[e2]['output_slot']
-                out_pos = e2_elem.slots_pos[output_slot]
-                u_chain = e2_elem.u(omega, out_pos) @ u_chain
+                u_chain = e2_elem.u(out_pos, omega) @ u_chain
             else:
-                u_chain = e2_elem.u_exts[dst_slot] @ u_chain
+                u_chain = e2_elem.u_ext(out_pos, dst_slot) @ u_chain
 
         return u_chain
 
@@ -349,7 +350,7 @@ class MBS:
                 g_mat = self.elements[mult_in_e_id].h_incs[dst_slot] @ u_chain
             return g_mat
         except nx.NetworkXNoPath:
-            return np.zeros((6, 12))
+            return np.zeros((6, 13))
 
     def overall_transfer(self, omega) -> Tuple[Matrix, Vector, Vector]:
         if self._root is None:
@@ -396,8 +397,8 @@ class MBS:
         g_block = np.hstack(g_cols)
 
         u_all = np.block([
-            [- np.identity(12), t_block],
-            [np.zeros((g_block.shape[0], 12)), g_block],
+            [- np.identity(13), t_block],
+            [np.zeros((g_block.shape[0], 13)), g_block],
         ])
 
         z_all = np.hstack([self._root.state_vector] + [b.state_vector for b in tips])

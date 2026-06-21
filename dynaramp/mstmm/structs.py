@@ -3,7 +3,7 @@ import logging
 
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Tuple
 
 import numpy as np
 
@@ -21,40 +21,90 @@ type ElemLike = EntityID | Element
 class Element(ABC):
     e_id: EntityID
     # positions of slots relative to the main input
-    slots_pos: Dict[EntityID, Vector]
+    slots_pos: Dict[EntityID, np.ndarray[tuple[int,], np.dtype[np.float64]]]
+
+    _f_load_at_in: Vector = field(default=np.zeros((12, 1)))  # Load vector transported to the main input
 
     h_ext: Matrix = field(init=False)
-    u_exts: Dict[EntityID, Matrix] = field(init=False)
     h_incs: Dict[EntityID, Matrix] = field(init=False)
 
     def __post_init__(self):
-        self.u_exts = {}
         self.h_incs = {}
-        # Auto-generate the extraction and incidence matrices
+        # Auto-generate the geometric extraction and incidence matrices (extended 13x1 state vectors)
         for s in self.slots_pos:
-
             r = self.slots_pos[s]  # position of slot relative to the main input
-            moment_block = np.block([
+            transform = np.block([  # Transform force and moments from slot Ik to slot I1
                 [np.identity(3), skew_sym_mat(r)],
                 [np.zeros((3, 3)), np.identity(3)]
             ])
             # H extraction
             self.h_ext = np.block([
-                np.identity(6), np.zeros((6, 6))
+                np.identity(6), np.zeros((6, 7))
              ])
-            # U extraction
-            self.u_exts[s] = np.block([
-                [np.zeros((6, 6)), np.zeros((6, 6))],
-                [np.zeros((6, 6)), moment_block]
-            ])
             # H incidence
             self.h_incs[s] = np.block([
-                moment_block, np.zeros((6, 6))
+                transform, np.zeros((6, 7))
             ])
 
+    def u(self, output_pos: Vector, omega: float) -> Matrix:
+        """
+        Returns the extended state transfer matrix for the element.
+        :param output_pos: Position of the output slot relative to the main input
+        :param omega: vibration frequency (rad/s)
+        :return: Transfer matrix (13x13)
+        """
+        # Transport external load vector from I1 to O
+        r = - np.array(output_pos)
+        transform = np.block([
+            [np.identity(6), skew_sym_mat(r)],
+            [np.zeros((6, 6)), np.identity(6)]
+        ])
+        f = transform @ self._f_load_at_in
+
+        u_extend = np.block([
+            [self._u(output_pos, omega), f],
+            [np.zeros((1, 12)), 1]
+        ])
+        return u_extend
+
     @abstractmethod
-    def u(self, omega: float, output_pos: Vector) -> Matrix:
+    def _u(self, output_pos: Vector, omega: float) -> Matrix:
         pass
+
+    def u_ext(self, out_pos: Vector, slot_id: EntityID) -> Matrix:
+        r = self.slots_pos[slot_id] - np.array(out_pos)
+        transform = np.block([  # Transform force and moments from slot Ik to slot O
+            [np.identity(3), skew_sym_mat(r)],
+            [np.zeros((3, 3)), np.identity(3)]
+        ])
+
+        u_ext_extend = np.block([
+            [np.zeros((6, 6)), np.zeros((6, 7))],
+            [np.zeros((6, 6)), transform, np.zeros((6, 1))],
+            [np.zeros((1, 12)), 1],
+        ])
+        return u_ext_extend
+
+    def apply_force(self, force: Vector, point: Vector) -> None:
+        """
+        Apply force to the element at a point defined relatively to the main input
+        :param force:
+        :param point:
+        :return:
+        """
+        r = np.array(point)
+        q = np.array(force)
+        m = np.cross(r, q)
+        self._f_load_at_in += np.hstack((np.zeros(6), m, q)).reshape((12, 1))
+
+    def apply_torque(self, torque: Vector) -> None:
+        """
+        Apply a pure torque to the element
+        :param torque:
+        :return:
+        """
+        m = np.array(torque)
+        self._f_load_at_in += np.hstack((np.zeros(6), m, np.zeros(3))).reshape((12, 1))
 
 
 @dataclass
@@ -71,6 +121,6 @@ class CutPoint:
     mat: Matrix = field(init=False)
 
     def __post_init__(self):
-        self.mat = np.identity(12)
+        self.mat = np.identity(13)
         if self.sign_matrix:
-            self.mat[6:, 6:] *= -1
+            self.mat[6:12, 6:12] *= -1

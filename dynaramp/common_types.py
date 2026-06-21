@@ -13,5 +13,5 @@ def is_entity_id(obj: object) -> TypeGuard[EntityID]:
     return isinstance(obj, (int, str, UUID, Enum))
 
 
-type Vector = np.ndarray[tuple[int,], np.dtype[np.float64]] | Tuple[float, ...]
-type Matrix = np.ndarray[tuple[int, int], np.dtype[np.float64]]
+type Vector = np.ndarray[Tuple[int,], np.dtype[np.float64]] | Tuple[float, ...]
+type Matrix = np.ndarray[Tuple[int, int], np.dtype[np.float64]]
