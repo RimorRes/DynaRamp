@@ -8,7 +8,7 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.optimize import minimize_scalar
 
-from ..common_types import EntityID, is_entity_id, Vector, Matrix
+from ..common_types import EntityID, is_entity_id, Vector, VectorLike, Matrix
 from .structs import Element, ElemLike, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ class MBS:
 
         return self
 
-    def add_root(self, boundary_sv: Vector, target_elem: ElemLike, output_slot: EntityID) -> EntityID:
+    def add_root(self, boundary_sv: VectorLike, target_elem: ElemLike, output_slot: EntityID) -> EntityID:
         # NO SLOT OVERWRITE PROTECTION
         if self._root is not None:
             err_msg = f"Root boundary is already defined as [{self._root.b_id}]."
@@ -97,7 +97,7 @@ class MBS:
 
         return root_boundary.b_id
 
-    def add_tip(self, boundary_sv: Vector, target_element: ElemLike, input_slot: EntityID | None) -> EntityID:
+    def add_tip(self, boundary_sv: VectorLike, target_element: ElemLike, input_slot: EntityID | None) -> EntityID:
         # NO SLOT OVERWRITE PROTECTION
         tgt_id = self._resolve_elem_id(target_element)
         if tgt_id not in self.elements:
@@ -364,7 +364,7 @@ class MBS:
         # TODO: move G block to here
         pass
 
-    def overall_transfer(self, omega) -> Tuple[Matrix, Vector, Vector]:
+    def overall_transfer(self, omega) -> Tuple[Matrix, Vector]:
         """
 
         :param omega:
@@ -432,11 +432,11 @@ class MBS:
         # Handle known boundary conditions
         known_mask = np.array([x is not None for x in z_all])
         nonzero_mask = np.array([x != 0 for x in z_all]) & known_mask
-        # Eliminate columns corresponding to known zero boundary conditions...
+        # Eliminate columns corresponding to known boundary conditions...
         u_red = u_all[:, ~ known_mask]
         # ... and move columns corresponding to known non-zero boundary conditions into a load vector
         u_nz = u_all[:, nonzero_mask]
-        z_nz = z_all[nonzero_mask]
+        z_nz = z_all[nonzero_mask].astype(np.float64)
         f = u_nz @ z_nz
         # Remove the trivial 13th row
         triv_mask = np.ones_like(f, dtype=bool)
@@ -449,9 +449,9 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        return u_red, f, known_mask
+        return u_red, f
 
-    def _sigma_min(self, omega):
+    def _sigma_min(self, omega: float) -> float:
         """
         Helper for retrieving the smallest singular value of an SVD of U_all(w).
         :param omega:
@@ -482,17 +482,17 @@ class MBS:
 
             res = minimize_scalar(
                 self._sigma_min,
-                bounds=(omega[idx - 1], omega[idx + 1]),
-                method="bounded"
+                bounds=(float(omega[idx - 1]), float(omega[idx + 1])),
+                method="bounded",
+                tol=tol
             )
 
-            if res.fun < tol:
-                u = self.overall_transfer(res.x)[0]
-                _, s, vh = np.linalg.svd(u)
+            u = self.overall_transfer(res.x)[0]
+            _, s, vh = np.linalg.svd(u)
 
-                mode_shape = vh[-1]  # or Vh[-1].T
+            mode_shape = vh[-1]  # or Vh[-1].T
 
-                modes.append((res.x, mode_shape))
+            modes.append((res.x, mode_shape))
 
         modes.sort(key=lambda x: x[0])
 

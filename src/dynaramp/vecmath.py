@@ -3,13 +3,13 @@ import logging
 
 import numpy as np
 
-from .common_types import Vector, Matrix
+from .common_types import VectorLike, Matrix
 
 
 logger = logging.getLogger(__name__)
 
 
-def skew_sym_mat(vec: Vector) -> Matrix:
+def skew_sym_mat(vec: VectorLike) -> Matrix:
     """
     Returns the skew symmetric matrix of a 3D vector.
     The skew symmetric matrix is defined such that for any vector v,

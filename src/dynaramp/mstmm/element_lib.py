@@ -7,7 +7,7 @@ import numpy as np
 
 from .structs import Element
 from ..vecmath import skew_sym_mat
-from ..common_types import EntityID, Vector, Matrix
+from ..common_types import EntityID, Vector, VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +19,8 @@ class RigidBody(Element):
             e_id: EntityID,
             mass: float,
             inertia: Matrix,
-            com: Vector,
-            slot_coords: Dict[EntityID, Vector]
+            com: VectorLike,
+            slot_coords: Dict[EntityID, VectorLike]
     ):
         slots_pos = {s_id: np.array(pos) for s_id, pos in slot_coords.items()}
         super().__init__(e_id, slots_pos)
@@ -31,7 +31,7 @@ class RigidBody(Element):
         r = - self.com_pos
         self.j = inertia + mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
 
-    def _u(self, output_pos: Vector, omega: float) -> Matrix:
+    def _u(self, output_pos: VectorLike, omega: float) -> Matrix:
         l_io = skew_sym_mat(output_pos)
         l_ic = skew_sym_mat(self.com_pos)
         l_co = l_io - l_ic
@@ -57,7 +57,7 @@ class EulerBernoulliBeam(Element):
             area: float,
             i_y: float,
             i_z: float,
-            slot_coords: Dict[EntityID, Vector]
+            slot_coords: Dict[EntityID, VectorLike]
     ):
         slots_pos = {s_id: np.array(pos) for s_id, pos in slot_coords.items()}
         super().__init__(e_id, slots_pos)
@@ -88,7 +88,7 @@ class EulerBernoulliBeam(Element):
     def _krylov_v(z: float) -> float:
         return (np.sinh(z) - np.sin(z)) / 2
 
-    def _u(self, output_pos: Vector, omega: float) -> Matrix:
+    def _u(self, output_pos: VectorLike, omega: float) -> Matrix:
         x, y, z = output_pos
 
         beta_x = np.sqrt(self.mu * omega**2 / (self.e * self.a))
@@ -139,7 +139,7 @@ class SpatialElasticHinge(Element):
             e_id: EntityID,
             k: Tuple[float, float, float],
             k_rot: Tuple[float, float, float],
-            slot_coords: Dict[EntityID, Vector]
+            slot_coords: Dict[EntityID, VectorLike]
     ):
         """
         :param k: Linear spring stiffnesses

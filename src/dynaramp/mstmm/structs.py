@@ -8,7 +8,7 @@ from typing import Dict
 import numpy as np
 
 from ..vecmath import skew_sym_mat
-from ..common_types import EntityID, Vector, Matrix
+from ..common_types import EntityID, Vector, VectorLike, Matrix
 
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ type ElemLike = EntityID | Element
 class Element(ABC):
     e_id: EntityID
     # positions of slots relative to the main input
-    slots_pos: Dict[EntityID, np.ndarray[tuple[int,], np.dtype[np.float64]]]
+    slots_pos: Dict[EntityID, Vector]
 
     _f_load_at_in: Vector = field(default_factory=lambda: np.zeros((12, 1)))  # Load vector transported to main input
 
@@ -46,7 +46,7 @@ class Element(ABC):
                 transform, np.zeros((6, 7))
             ])
 
-    def u(self, output_pos: Vector, omega: float) -> Matrix:
+    def u(self, output_pos: VectorLike, omega: float) -> Matrix:
         """
         Returns the extended state transfer matrix for the element.
         :param output_pos: Position of the output slot relative to the main input
@@ -69,11 +69,11 @@ class Element(ABC):
         return u_extend
 
     @abstractmethod
-    def _u(self, output_pos: Vector, omega: float) -> Matrix:
+    def _u(self, output_pos: VectorLike, omega: float) -> Matrix:
         pass
 
-    def u_ext(self, out_pos: Vector, slot_id: EntityID) -> Matrix:
-        r = self.slots_pos[slot_id] - np.array(out_pos)
+    def u_ext(self, output_pos: VectorLike, slot_id: EntityID) -> Matrix:
+        r = self.slots_pos[slot_id] - np.array(output_pos)
         transform = np.block([  # Transform force and moments from slot Ik to slot O
             [np.identity(3), skew_sym_mat(r)],
             [np.zeros((3, 3)), np.identity(3)]
@@ -86,7 +86,7 @@ class Element(ABC):
         ])
         return u_ext_extend
 
-    def apply_force(self, force: Vector, point: Vector) -> None:
+    def apply_force(self, force: VectorLike, point: VectorLike) -> None:
         """
         Apply force to the element at a point defined relatively to the main input
         :param force:
@@ -98,7 +98,7 @@ class Element(ABC):
         m = np.cross(r, q)
         self._f_load_at_in += np.hstack((np.zeros(6), m, q)).reshape((12, 1))
 
-    def apply_torque(self, torque: Vector) -> None:
+    def apply_torque(self, torque: VectorLike) -> None:
         """
         Apply a pure torque to the element
         :param torque:
@@ -111,7 +111,7 @@ class Element(ABC):
 @dataclass
 class Boundary:
     b_id: EntityID
-    state_vector: Vector  # Numerical value for known boundary value, None for unknown
+    state_vector: VectorLike  # Numerical value for known boundary value, None for unknown
 
 
 @dataclass
