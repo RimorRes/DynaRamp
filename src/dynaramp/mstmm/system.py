@@ -5,6 +5,8 @@ from typing import Tuple, List, Dict, Iterable, Sequence
 
 import networkx as nx
 import numpy as np
+from scipy.signal import find_peaks
+from scipy.optimize import minimize_scalar
 
 from ..common_types import EntityID, is_entity_id, Vector, Matrix
 from .structs import Element, ElemLike, Boundary, CutPoint
@@ -71,7 +73,7 @@ class MBS:
 
         return self
 
-    def add_root(self, boundary_sv: Vector, target_elem: ElemLike, output_slot: int) -> EntityID:
+    def add_root(self, boundary_sv: Vector, target_elem: ElemLike, output_slot: EntityID) -> EntityID:
         # NO SLOT OVERWRITE PROTECTION
         if self._root is not None:
             err_msg = f"Root boundary is already defined as [{self._root.b_id}]."
@@ -95,7 +97,7 @@ class MBS:
 
         return root_boundary.b_id
 
-    def add_tip(self, boundary_sv: Vector, target_element: ElemLike, input_slot: int) -> EntityID:
+    def add_tip(self, boundary_sv: Vector, target_element: ElemLike, input_slot: EntityID | None) -> EntityID:
         # NO SLOT OVERWRITE PROTECTION
         tgt_id = self._resolve_elem_id(target_element)
         if tgt_id not in self.elements:
@@ -268,9 +270,9 @@ class MBS:
     def make_tree(self) -> MBS:
         log_prefix = "Making system tree:"
 
-        logger.debug(f"{log_prefix}: auto resolving edges to cut.")
+        logger.debug(f"{log_prefix} auto resolving edges to cut.")
         c2c = self._find_cuts(self.graph)
-        logger.debug(f"{log_prefix}: cutting edges.")
+        logger.debug(f"{log_prefix} cutting edges.")
         for connection in c2c:
             self.cut_connection(connection)
 
@@ -285,7 +287,9 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        # Buffer the output slot of all element nodes to speed up the transfer matrix calculations
+        logger.info(f"{log_prefix} validated topology.")
+
+        # Buffer the output slot of all element/boundary nodes to speed up the transfer matrix calculations
         for e in self.elements:
             successor = next(iter(self.graph[e]))
             out_slot = next(
@@ -294,8 +298,12 @@ class MBS:
                 if value == "output"
             )
             self._successor_in_tree[e] = {'output_slot': out_slot, 'next': successor}
-
-        logger.info(f"{log_prefix}: validated topology.")
+        # Same operation on the tips (we exclude the root as it has no output)
+        for b_id, boundary in self._boundaries.items():
+            if boundary is self._root:
+                continue
+            successor = next(iter(self.graph[b_id]))
+            self._successor_in_tree[b_id] = {'output_slot': None, 'next': successor}
 
         return self
 
@@ -339,7 +347,7 @@ class MBS:
 
         return u_chain
 
-    def _geometric_mat(self, tip_id: EntityID, mult_in_e_id: EntityID, omega: float) -> Matrix:
+    def _geometric_equation(self, tip_id: EntityID, mult_in_e_id: EntityID, omega: float) -> Matrix:
         try:
             path = self._resolve_branch_up_to(src=tip_id, tgt=mult_in_e_id)
             u_chain = self._transfer_mat_along_path(path, omega)
@@ -352,11 +360,22 @@ class MBS:
         except nx.NetworkXNoPath:
             return np.zeros((6, 13))
 
+    def _geometric_equation_coef_mat(self, multi_input_elems: List[EntityID]) -> Matrix:
+        # TODO: move G block to here
+        pass
+
     def overall_transfer(self, omega) -> Tuple[Matrix, Vector, Vector]:
+        """
+
+        :param omega:
+        :return:
+        """
+
         if self._root is None:
             err_msg = "Root element not identified."
             logger.error(err_msg)
             raise ValueError(err_msg)
+
         # Sort the boundaries -> [root, tip1, tip2, ...]
         tips = [b for b in self._boundaries.values() if b is not self._root]
 
@@ -369,37 +388,44 @@ class MBS:
                 raise ValueError(f"No path found from tip [{tip.b_id}] to root [{self._root.b_id}].")
 
         multi_input_elems = [e_id for e_id in self.elements if self.graph.in_degree(e_id) > 1]
-        g_cols = []
-        for tip in tips:
-            col = []
-            for mult_in_e_id in multi_input_elems:
-                col.append(self._geometric_mat(tip.b_id, mult_in_e_id, omega))
-            g_cols.append(np.vstack(col))
+        # TODO: move to seperate function
+        if multi_input_elems:
+            g_cols = []
+            for tip in tips:
+                col = []
+                for mult_in_e_id in multi_input_elems:
+                    col.append(self._geometric_equation(tip.b_id, mult_in_e_id, omega))
+                g_cols.append(np.vstack(col))
 
-        # Condense columns at cut points
-        for cut in self._cut_points:
-            # Find the index of the cut's tip boundaries in the tip list
-            try:
-                idx1 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id1)
-                idx2 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id2)
-            except StopIteration:
-                raise ValueError(f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips.")
+            # Condense columns at cut points
+            for cut in self._cut_points:
+                # Find the index of the cut's tip boundaries in the tip list
+                try:
+                    idx1 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id1)
+                    idx2 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id2)
+                except StopIteration:
+                    raise ValueError(f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips.")
 
-            t_mats[idx1] += t_mats[idx2] @ cut.mat
-            t_mats.pop(idx2)
+                t_mats[idx1] += t_mats[idx2] @ cut.mat
+                t_mats.pop(idx2)
 
-            g_cols[idx1] += g_cols[idx2] @ cut.mat
-            g_cols.pop(idx2)
+                g_cols[idx1] += g_cols[idx2] @ cut.mat
+                g_cols.pop(idx2)
 
-            tips.pop(idx2)
+                tips.pop(idx2)
 
-        t_block = np.hstack(t_mats)
-        g_block = np.hstack(g_cols)
+            t_block = np.hstack(t_mats)
+            g_block = np.hstack(g_cols)
 
-        u_all = np.block([
-            [- np.identity(13), t_block],
-            [np.zeros((g_block.shape[0], 13)), g_block],
-        ])
+            u_all = np.block([
+                [- np.identity(13), t_block],
+                [np.zeros((g_block.shape[0], 13)), g_block],
+            ])
+        else:
+            t_block = np.hstack(t_mats)
+            u_all = np.block([
+                - np.identity(13), t_block
+            ])
 
         z_all = np.hstack([self._root.state_vector] + [b.state_vector for b in tips])
 
@@ -412,5 +438,62 @@ class MBS:
         u_nz = u_all[:, nonzero_mask]
         z_nz = z_all[nonzero_mask]
         f = u_nz @ z_nz
+        # Remove the trivial 13th row
+        triv_mask = np.ones_like(f, dtype=bool)
+        triv_mask[12] = False
+        f = f[triv_mask]
+        u_red = u_red[triv_mask, :]
+
+        if u_red.shape[0] != u_red.shape[1]:
+            err_msg = "Invalid boundary conditions: The system is either under-constrained or over-constrained"
+            logger.error(err_msg)
+            raise ValueError(err_msg)
 
         return u_red, f, known_mask
+
+    def _sigma_min(self, omega):
+        """
+        Helper for retrieving the smallest singular value of an SVD of U_all(w).
+        :param omega:
+        :return:
+        """
+        u = self.overall_transfer(omega)[0]
+        return np.linalg.svd(u, compute_uv=False)[-1]
+
+    def natural_modes(
+            self,
+            n_modes: int,
+            omega_max: int = 1000,
+            search_res: int = 5000,
+            tol: float = 1e-4
+    ) -> List[Tuple[float, Vector]]:
+
+        omega = np.linspace(0, omega_max, search_res)[1:]  # skip omega = 0
+
+        sigma = np.array([self._sigma_min(w) for w in omega])
+
+        candidates, _ = find_peaks(-sigma)
+
+        modes = []
+
+        for idx in candidates:
+            if idx == 0 or idx == len(omega) - 1:
+                continue
+
+            res = minimize_scalar(
+                self._sigma_min,
+                bounds=(omega[idx - 1], omega[idx + 1]),
+                method="bounded"
+            )
+
+            if res.fun < tol:
+                u = self.overall_transfer(res.x)[0]
+                _, s, vh = np.linalg.svd(u)
+
+                mode_shape = vh[-1]  # or Vh[-1].T
+
+                modes.append((res.x, mode_shape))
+
+        modes.sort(key=lambda x: x[0])
+
+        return modes[:n_modes]

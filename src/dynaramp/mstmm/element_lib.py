@@ -16,7 +16,7 @@ class RigidBody(Element):
 
     def __init__(
             self,
-            e_id,
+            e_id: EntityID,
             mass: float,
             inertia: Matrix,
             com: Vector,
@@ -55,8 +55,8 @@ class EulerBernoulliBeam(Element):
             youngs_mod: float,
             shear_mod: float,
             area: float,
-            i_y: Matrix,
-            i_z: Matrix,
+            i_y: float,
+            i_z: float,
             slot_coords: Dict[EntityID, Vector]
     ):
         slots_pos = {s_id: np.array(pos) for s_id, pos in slot_coords.items()}

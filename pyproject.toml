@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dynaramp"
+version = "0.1.0"
+description = "Dynamic response solver for rail-launched vehicles"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.4.6",
+    "scipy>=1.18.0",
+    "matplotlib>=3.11.0",
+    "networkx>=3.6.1",
+    "pytest>=9.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "DEBUG"
+log_cli_format = "%(asctime)s %(levelname)s [%(name)s] %(filename)s:%(lineno)d %(funcName)s - %(message)s"

@@ -3,7 +3,7 @@ import logging
 
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Dict, Tuple
+from typing import Dict
 
 import numpy as np
 
@@ -23,7 +23,7 @@ class Element(ABC):
     # positions of slots relative to the main input
     slots_pos: Dict[EntityID, np.ndarray[tuple[int,], np.dtype[np.float64]]]
 
-    _f_load_at_in: Vector = field(default=np.zeros((12, 1)))  # Load vector transported to the main input
+    _f_load_at_in: Vector = field(default_factory=lambda: np.zeros((12, 1)))  # Load vector transported to main input
 
     h_ext: Matrix = field(init=False)
     h_incs: Dict[EntityID, Matrix] = field(init=False)
@@ -56,8 +56,9 @@ class Element(ABC):
         # Transport external load vector from I1 to O
         r = - np.array(output_pos)
         transform = np.block([
-            [np.identity(6), skew_sym_mat(r)],
-            [np.zeros((6, 6)), np.identity(6)]
+            [np.zeros((6, 12))],
+            [np.zeros((3, 6)), np.identity(3), skew_sym_mat(r)],
+            [np.zeros((3, 6)), np.zeros((3, 3)), np.identity(3)]
         ])
         f = transform @ self._f_load_at_in
 
