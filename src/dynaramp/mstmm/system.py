@@ -212,7 +212,7 @@ class MBS:
                     # Cutting a connection in this case generates a new INPUT and OUTPUT.
                     # No C sign matrix will be needed. Both state vectors are equal
                     cut = CutPoint(b_id1, b_id2, False)
-                    logger.debug(f"{log_prefix} cut closed loop. Created new root [{b_id1}] and tip [{b_id2}].")
+                    logger.info(f"{log_prefix} cut closed loop. Created new root [{b_id1}] and tip [{b_id2}].")
                 except ValueError:
                     err_msg = f"{log_prefix} failed to cut the connection. Could not create new root."
                     logger.error(err_msg)
@@ -268,11 +268,10 @@ class MBS:
         return connections_to_cut
 
     def make_tree(self) -> MBS:
-        log_prefix = "Making system tree:"
+        logger.info("Transforming system into a tree structure.")
 
-        logger.debug(f"{log_prefix} auto resolving edges to cut.")
+        logger.debug(f"Auto resolving edges to cut.")
         c2c = self._find_cuts(self.graph)
-        logger.debug(f"{log_prefix} cutting edges.")
         for connection in c2c:
             self.cut_connection(connection)
 
@@ -283,11 +282,11 @@ class MBS:
         # (only tips can verify this condition and be connected as they are not internal nodes);
         # ergo this effectively validates the tree structure where every element has exactly one ouput.
         if not nx.is_arborescence(nx.reverse_view(self.graph)):
-            err_msg = f"{log_prefix} invalid topology. Could not transform system into a tree."
+            err_msg = f"Invalid topology. Could not transform system into a tree."
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        logger.info(f"{log_prefix} validated topology.")
+        logger.debug(f"Validated topology.")
 
         # Buffer the output slot of all element/boundary nodes to speed up the transfer matrix calculations
         for e in self.elements:
@@ -304,6 +303,8 @@ class MBS:
                 continue
             successor = next(iter(self.graph[b_id]))
             self._successor_in_tree[b_id] = {'output_slot': None, 'next': successor}
+
+        logger.info("Successfully built valid tree system.")
 
         return self
 
@@ -360,10 +361,6 @@ class MBS:
         except nx.NetworkXNoPath:
             return np.zeros((6, 13))
 
-    def _geometric_equation_coef_mat(self, multi_input_elems: List[EntityID]) -> Matrix:
-        # TODO: move G block to here
-        pass
-
     def overall_transfer(self, omega) -> Tuple[Matrix, Vector]:
         """
 
@@ -381,14 +378,11 @@ class MBS:
 
         t_mats = []
         for tip in tips:
-            try:
-                path = self._resolve_branch_up_to(src=tip.b_id, tgt=self._root.b_id)
-                t_mats.append(self._transfer_mat_along_path(path, omega))
-            except nx.NetworkXNoPath:
-                raise ValueError(f"No path found from tip [{tip.b_id}] to root [{self._root.b_id}].")
+            path = self._resolve_branch_up_to(src=tip.b_id, tgt=self._root.b_id)
+            t_mats.append(self._transfer_mat_along_path(path, omega))
 
         multi_input_elems = [e_id for e_id in self.elements if self.graph.in_degree(e_id) > 1]
-        # TODO: move to seperate function
+
         if multi_input_elems:
             g_cols = []
             for tip in tips:
@@ -404,7 +398,9 @@ class MBS:
                     idx1 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id1)
                     idx2 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id2)
                 except StopIteration:
-                    raise ValueError(f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips.")
+                    err_msg = f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips."
+                    logger.error(err_msg)
+                    raise ValueError(err_msg)
 
                 t_mats[idx1] += t_mats[idx2] @ cut.mat
                 t_mats.pop(idx2)
@@ -465,14 +461,15 @@ class MBS:
             n_modes: int,
             omega_max: int = 1000,
             search_res: int = 5000,
-            tol: float = 1e-4
+            rtol: float = 1e-5  # Reciprocal condition number tolerance
     ) -> List[Tuple[float, Vector]]:
 
         omega = np.linspace(0, omega_max, search_res)[1:]  # skip omega = 0
 
         sigma = np.array([self._sigma_min(w) for w in omega])
 
-        candidates, _ = find_peaks(-sigma)
+        prominence = 5e-2 * np.max(sigma)
+        candidates, _ = find_peaks(-sigma, prominence=prominence)
 
         modes = []
 
@@ -482,18 +479,23 @@ class MBS:
 
             res = minimize_scalar(
                 self._sigma_min,
-                bounds=(float(omega[idx - 1]), float(omega[idx + 1])),
-                method="bounded",
-                tol=tol
+                bounds=(omega[idx - 1], omega[idx + 1]),
+                method="bounded"
             )
 
             u = self.overall_transfer(res.x)[0]
             _, s, vh = np.linalg.svd(u)
 
-            mode_shape = vh[-1]  # or Vh[-1].T
+            logger.debug(f"Mode candidate at {res.x:.4f} rad/s: "
+                         f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {s[-1]/s[0]:.6e}")
 
-            modes.append((res.x, mode_shape))
+            if s[-1]/s[0] < rtol:
+                modes.append((res.x, vh[-1]))  # or Vh[-1].T for the mode shape
 
         modes.sort(key=lambda x: x[0])
+
+        logger.info(f"Found {len(modes)} natural modes up to {omega_max} rad/s.")
+        for w, _ in modes:
+            logger.debug(f"Mode at {w:.4f} rad/s.")
 
         return modes[:n_modes]
