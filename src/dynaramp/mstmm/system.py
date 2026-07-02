@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 
 from typing import Tuple, List, Dict, Iterable, Sequence
+from collections import deque, defaultdict
 
 import networkx as nx
 import numpy as np
@@ -13,12 +14,15 @@ from .structs import Element, ElemLike, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
 
+# TODO: better error raising, custom exceptions?
+# TODO: separate graph and tree
+
 
 class MBS:
 
     def __init__(self):
-        self.elements: Dict[EntityID, Element] = {}
-        self.slot_occupancy: Dict[EntityID, Dict[EntityID | None, str | None]] = {}  # 'input', 'output' or None
+        self._elements: Dict[EntityID, Element] = {}
+        self._slot_occupancy: Dict[EntityID, Dict[EntityID | None, str | None]] = {}  # 'input', 'output' or None
 
         self._root: Boundary | None = None
         self._boundaries: Dict[EntityID, Boundary] = {}
@@ -26,6 +30,34 @@ class MBS:
 
         self.graph: nx.DiGraph = nx.DiGraph()
         self._successor_in_tree = {}
+
+    # Read-only attributes
+    @property
+    def elements(self) -> Dict[EntityID, Element]:
+        return self._elements
+
+    @property
+    def root(self) -> Boundary:
+        if self._root is None:
+            err_msg = "Root element not identified."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+        else:
+            return self._root
+
+    @property
+    def boundaries(self) -> Dict[EntityID, Boundary]:
+        return self._boundaries
+
+    @property
+    def tips(self) -> Dict[EntityID, Boundary]:
+        # TODO: Optimize
+        return {b_id: b for b_id, b in self._boundaries.items() if b is not self.root}
+
+    @property
+    def z_all(self) -> Vector:
+        # TODO: Optimize
+        return np.hstack([self.root.state_vector] + [b.state_vector for b in self.tips.values()])
 
     @staticmethod
     def _resolve_elem_id(elem_or_eid: ElemLike) -> EntityID:
@@ -62,13 +94,13 @@ class MBS:
                 logger.error(err_msg)
                 raise TypeError(err_msg)
 
-            self.elements[elem.e_id] = elem
+            self._elements[elem.e_id] = elem
             self.graph.add_node(elem.e_id)
             # Initializing slot status for the new element
             occupancy_init: Dict[EntityID | None, str | None] = {None: None}  # init `None` a.k.a `MAIN` slot
             for s in elem.slots_pos:
                 occupancy_init[s] = None
-            self.slot_occupancy[elem.e_id] = occupancy_init
+            self._slot_occupancy[elem.e_id] = occupancy_init
             logger.debug("Adding element %r to the system.", elem.e_id)
 
         return self
@@ -81,17 +113,17 @@ class MBS:
             raise ValueError(err_msg)
 
         tgt_id = self._resolve_elem_id(target_elem)
-        if tgt_id not in self.elements:
+        if tgt_id not in self._elements:
             err_msg = f"Cannot add root: target element [{tgt_id}] is missing from the system."
             logger.error(err_msg)
             raise KeyError(err_msg)
 
-        root_boundary = Boundary(b_id=f"{tgt_id}.{output_slot},0", state_vector=boundary_sv)
+        root_boundary = Boundary(b_id=f"{tgt_id}.{output_slot}, 0", state_vector=boundary_sv)
         self._root = root_boundary
         self._boundaries[root_boundary.b_id] = root_boundary
         self.graph.add_node(root_boundary.b_id)
-        self.graph.add_edge(tgt_id, root_boundary.b_id, src_slot=output_slot, dst_slot=None)
-        self.slot_occupancy[tgt_id][output_slot] = 'output'
+        self.graph.add_edge(tgt_id, root_boundary.b_id, output_slot=output_slot, input_slot=None)
+        self._slot_occupancy[tgt_id][output_slot] = 'output'
 
         logger.debug(f"Added [{root_boundary.b_id}] as the root boundary to element [{tgt_id}].")
 
@@ -100,16 +132,16 @@ class MBS:
     def add_tip(self, boundary_sv: VectorLike, target_element: ElemLike, input_slot: EntityID | None) -> EntityID:
         # NO SLOT OVERWRITE PROTECTION
         tgt_id = self._resolve_elem_id(target_element)
-        if tgt_id not in self.elements:
+        if tgt_id not in self._elements:
             err_msg = f"Cannot add tip: target element [{tgt_id}] is missing from the system."
             logger.error(err_msg)
             raise KeyError(err_msg)
 
-        tip_boundary = Boundary(b_id=f"{tgt_id}.{input_slot},0", state_vector=boundary_sv)
+        tip_boundary = Boundary(b_id=f"{tgt_id}.{input_slot}, 0", state_vector=boundary_sv)
         self._boundaries[tip_boundary.b_id] = tip_boundary
         self.graph.add_node(tip_boundary.b_id)
-        self.graph.add_edge(tip_boundary.b_id, tgt_id, src_slot=None, dst_slot=input_slot)
-        self.slot_occupancy[tgt_id][input_slot] = 'input'
+        self.graph.add_edge(tip_boundary.b_id, tgt_id, output_slot=None, input_slot=input_slot)
+        self._slot_occupancy[tgt_id][input_slot] = 'input'
 
         logger.debug(f"Added [{tip_boundary.b_id}] as a tip boundary to element [{tgt_id}].")
 
@@ -128,7 +160,7 @@ class MBS:
         log_prefix = f"[{src_id}] -> [{dst_id}]:"
 
         # Prevent creating an invalid link referencing non-existent elements
-        if src_id not in self.elements or dst_id not in self.elements:
+        if src_id not in self._elements or dst_id not in self._elements:
             err_msg = f"{log_prefix} element(s) missing from the system."
             logger.error(err_msg)
             raise KeyError(err_msg)
@@ -150,7 +182,7 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
         try:
-            if self.slot_occupancy[src_id][src_slot] is not None:
+            if self._slot_occupancy[src_id][src_slot] is not None:
                 err_msg = f"{log_prefix} slot [{src_slot}] of element [{src_id}] is already populated."
                 logger.error(err_msg)
                 raise ValueError(err_msg)
@@ -162,7 +194,7 @@ class MBS:
 
         # DESTINATION ELEMENT
         try:
-            if self.slot_occupancy[dst_id][dst_slot] is not None:
+            if self._slot_occupancy[dst_id][dst_slot] is not None:
                 err_msg = (f"{log_prefix} slot [{"MAIN" if dst_slot is None else dst_slot}] "
                            f"of element [{dst_id}] is already populated.")
                 logger.error(err_msg)
@@ -175,9 +207,9 @@ class MBS:
         # After both elements are validated, they can be linked
         logger.debug(f"{log_prefix} linking from source slot [{src_slot}] "
                      f"to destination slot [{"MAIN" if dst_slot is None else dst_slot}].")
-        self.slot_occupancy[src_id][src_slot] = 'output'
-        self.slot_occupancy[dst_id][dst_slot] = 'input'
-        self.graph.add_edge(src_id, dst_id, src_slot=src_slot, dst_slot=dst_slot)
+        self._slot_occupancy[src_id][src_slot] = 'output'
+        self._slot_occupancy[dst_id][dst_slot] = 'input'
+        self.graph.add_edge(src_id, dst_id, output_slot=src_slot, input_slot=dst_slot)
 
         return self
 
@@ -187,8 +219,8 @@ class MBS:
         log_prefix = f"Cutting [{src_id}] -/> [{dst_id}]:"
 
         try:
-            src_slot = self.graph[src_id][dst_id]['src_slot']
-            dst_slot = self.graph[src_id][dst_id]['dst_slot']
+            src_slot = self.graph[src_id][dst_id]['output_slot']
+            dst_slot = self.graph[src_id][dst_id]['input_slot']
         except KeyError:
             err_msg = f"{log_prefix} specified connection does not exist in the system."
             logger.error(err_msg)
@@ -207,16 +239,16 @@ class MBS:
                     in_cycle = True
             if in_cycle:
                 try:
-                    b_id1 = self.add_root(np.full(13, None), self.elements[src_id], src_slot)
-                    b_id2 = self.add_tip(np.full(13, None), self.elements[dst_id], dst_slot)
+                    b_id1 = self.add_root(np.full(13, None), self._elements[src_id], src_slot)
+                    b_id2 = self.add_tip(np.full(13, None), self._elements[dst_id], dst_slot)
                     # Cutting a connection in this case generates a new INPUT and OUTPUT.
                     # No C sign matrix will be needed. Both state vectors are equal
                     cut = CutPoint(b_id1, b_id2, False)
                     logger.info(f"{log_prefix} cut closed loop. Created new root [{b_id1}] and tip [{b_id2}].")
-                except ValueError:
+                except ValueError as exc:
                     err_msg = f"{log_prefix} failed to cut the connection. Could not create new root."
                     logger.error(err_msg)
-                    raise ValueError(err_msg)
+                    raise ValueError(err_msg) from exc
             else:
                 err_msg = (f"{log_prefix} source element [{src_id}] has only one output. Cutting this connection "
                            f"would isolate the downstream elements.")
@@ -224,8 +256,8 @@ class MBS:
                 raise ValueError(err_msg)
 
         else:
-            b_id1 = self.add_tip(np.full(13, None), self.elements[src_id], src_slot)
-            b_id2 = self.add_tip(np.full(13, None), self.elements[dst_id], dst_slot)
+            b_id1 = self.add_tip(np.full(13, None), self._elements[src_id], src_slot)
+            b_id2 = self.add_tip(np.full(13, None), self._elements[dst_id], dst_slot)
             # Cutting a connection in this case generates two new INPUT tips/boundaries.
             # C sign matrix will be needed
             cut = CutPoint(b_id1, b_id2)
@@ -241,12 +273,7 @@ class MBS:
 
     def _find_cuts(self, graph: nx.DiGraph) -> List[Tuple[EntityID, EntityID]]:
         # Identify and cut connections between elements to get a tree system
-
         # At this step a valid and unique root must be selected
-        if self._root is None:
-            err_msg = "Root element not identified."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
 
         connections_to_cut = []
         # Handle diverging nodes (out_degree > 1)
@@ -255,7 +282,7 @@ class MBS:
             succs = iter(graph[dnode])
             # Each element can only have one output
             # We can choose to only keep the output with the shortest path to root
-            preserved = nx.shortest_path(graph, source=dnode, target=self._root.b_id)[1]
+            preserved = nx.shortest_path(graph, source=dnode, target=self.root.b_id)[1]
             for n in succs:
                 if n != preserved:
                     connections_to_cut.append((dnode, n))
@@ -289,17 +316,17 @@ class MBS:
         logger.debug(f"Validated topology.")
 
         # Buffer the output slot of all element/boundary nodes to speed up the transfer matrix calculations
-        for e in self.elements:
+        for e in self._elements:
             successor = next(iter(self.graph[e]))
             out_slot = next(
                 slot
-                for slot, value in self.slot_occupancy[e].items()
+                for slot, value in self._slot_occupancy[e].items()
                 if value == "output"
             )
             self._successor_in_tree[e] = {'output_slot': out_slot, 'next': successor}
         # Same operation on the tips (we exclude the root as it has no output)
         for b_id, boundary in self._boundaries.items():
-            if boundary is self._root:
+            if boundary is self.root:
                 continue
             successor = next(iter(self.graph[b_id]))
             self._successor_in_tree[b_id] = {'output_slot': None, 'next': successor}
@@ -323,7 +350,7 @@ class MBS:
                 node = self._successor_in_tree[node]['next']
             except KeyError:
                 err_msg = f"No path found from [{src}] to [{tgt}]."
-                logger.error(err_msg)
+                logger.warning(err_msg)
                 raise ValueError(err_msg)
 
         return path
@@ -335,16 +362,16 @@ class MBS:
         for i in range(len(path) - 1):
             e1, e2 = path[i], path[i + 1]
 
-            e2_elem = self.elements[e2]
-            dst_slot = self.graph[e1][e2]['dst_slot']
+            e2_elem = self._elements[e2]
+            input_slot = self.graph[e1][e2]['input_slot']
             # Retrieve the position of the output
             output_slot = self._successor_in_tree[e2]['output_slot']
             out_pos = e2_elem.slots_pos[output_slot]
-            # Here we apply the transfer matrix for the element e2 based on its input slot (dst_slot)
-            if dst_slot is None:
+            # Here we apply the transfer matrix for the element e2 based on its input slot (input_slot)
+            if input_slot is None:
                 u_chain = e2_elem.u(out_pos, omega) @ u_chain
             else:
-                u_chain = e2_elem.u_ext(out_pos, dst_slot) @ u_chain
+                u_chain = e2_elem.u_ext(out_pos, input_slot) @ u_chain
 
         return u_chain
 
@@ -352,13 +379,13 @@ class MBS:
         try:
             path = self._resolve_branch_up_to(src=tip_id, tgt=mult_in_e_id)
             u_chain = self._transfer_mat_along_path(path, omega)
-            dst_slot = self.graph[path[-1]][mult_in_e_id]['dst_slot']
-            if dst_slot is None:
-                g_mat = - self.elements[mult_in_e_id].h_ext @ u_chain
+            input_slot = self.graph[path[-1]][mult_in_e_id]['input_slot']
+            if input_slot is None:
+                g_mat = - self._elements[mult_in_e_id].h_ext @ u_chain
             else:
-                g_mat = self.elements[mult_in_e_id].h_incs[dst_slot] @ u_chain
+                g_mat = self._elements[mult_in_e_id].h_incs[input_slot] @ u_chain
             return g_mat
-        except nx.NetworkXNoPath:
+        except ValueError:
             return np.zeros((6, 13))
 
     def overall_transfer(self, omega) -> Tuple[Matrix, Vector]:
@@ -368,20 +395,15 @@ class MBS:
         :return:
         """
 
-        if self._root is None:
-            err_msg = "Root element not identified."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
         # Sort the boundaries -> [root, tip1, tip2, ...]
-        tips = [b for b in self._boundaries.values() if b is not self._root]
+        tips = [b for b in self._boundaries.values() if b is not self.root]
 
         t_mats = []
         for tip in tips:
-            path = self._resolve_branch_up_to(src=tip.b_id, tgt=self._root.b_id)
+            path = self._resolve_branch_up_to(src=tip.b_id, tgt=self.root.b_id)
             t_mats.append(self._transfer_mat_along_path(path, omega))
 
-        multi_input_elems = [e_id for e_id in self.elements if self.graph.in_degree(e_id) > 1]
+        multi_input_elems = [e_id for e_id in self._elements if self.graph.in_degree(e_id) > 1]
 
         if multi_input_elems:
             g_cols = []
@@ -423,16 +445,14 @@ class MBS:
                 - np.identity(13), t_block
             ])
 
-        z_all = np.hstack([self._root.state_vector] + [b.state_vector for b in tips])
-
         # Handle known boundary conditions
-        known_mask = np.array([x is not None for x in z_all])
-        nonzero_mask = np.array([x != 0 for x in z_all]) & known_mask
+        known_mask = np.array([x is not None for x in self.z_all])
+        nonzero_mask = np.array([x != 0 for x in self.z_all]) & known_mask
         # Eliminate columns corresponding to known boundary conditions...
         u_red = u_all[:, ~ known_mask]
         # ... and move columns corresponding to known non-zero boundary conditions into a load vector
         u_nz = u_all[:, nonzero_mask]
-        z_nz = z_all[nonzero_mask].astype(np.float64)
+        z_nz = self.z_all[nonzero_mask].astype(np.float64)
         f = u_nz @ z_nz
         # Remove the trivial 13th row
         triv_mask = np.ones_like(f, dtype=bool)
@@ -447,6 +467,22 @@ class MBS:
 
         return u_red, f
 
+    def reconstruct_boundary_states(self, z_red: Vector) -> Dict[EntityID, Vector]:
+        # Rebuild the overall state vector from the computed reduced state
+        z_all_full = np.empty(self.z_all.shape, dtype=np.float64)
+        z_red_iter = iter(z_red)
+        for i, x in enumerate(self.z_all):
+            if x is None:
+                z_all_full[i] = next(z_red_iter)
+            else:
+                z_all_full[i] = x
+        # Decompose z_all_full into it's component state vectors for each boundary
+        bound_svs = z_all_full.reshape((len(self._boundaries), 13))
+
+        keys = [self.root.b_id] + [t for t in self.tips]
+
+        return {keys[i]: sv for i, sv in enumerate(bound_svs)}
+
     def _sigma_min(self, omega: float) -> float:
         """
         Helper for retrieving the smallest singular value of an SVD of U_all(w).
@@ -455,6 +491,9 @@ class MBS:
         """
         u = self.overall_transfer(omega)[0]
         return np.linalg.svd(u, compute_uv=False)[-1]
+
+    def solve(self):
+        pass
 
     def natural_modes(
             self,
@@ -465,37 +504,112 @@ class MBS:
     ) -> List[Tuple[float, Vector]]:
 
         omega = np.linspace(0, omega_max, search_res)[1:]  # skip omega = 0
-
         sigma = np.array([self._sigma_min(w) for w in omega])
-
+        # Find rough peaks corresponding to the smallest singular values
         prominence = 5e-2 * np.max(sigma)
         candidates, _ = find_peaks(-sigma, prominence=prominence)
 
         modes = []
-
+        # Refine candidates
         for idx in candidates:
             if idx == 0 or idx == len(omega) - 1:
                 continue
-
+            # Minimize the singular values that approach zero
             res = minimize_scalar(
                 self._sigma_min,
                 bounds=(omega[idx - 1], omega[idx + 1]),
                 method="bounded"
             )
-
+            # Apply SVD to the transfer matrix at the refined frequency
             u = self.overall_transfer(res.x)[0]
             _, s, vh = np.linalg.svd(u)
+            # Reciprocal condition number
+            rcond = s[-1] / s[0]
 
-            logger.debug(f"Mode candidate at {res.x:.4f} rad/s: "
-                         f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {s[-1]/s[0]:.6e}")
-
-            if s[-1]/s[0] < rtol:
-                modes.append((res.x, vh[-1]))  # or Vh[-1].T for the mode shape
+            logger.debug(f"Mode candidate at {res.x:.3e} rad/s: "
+                         f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
+            # If rcond passes the tolerance, save the frequency and mode shape
+            if rcond < rtol:
+                all_state_vecs = self._propagate_state(z_red=vh[-1], omega=res.x)   # or Vh[-1].T for the mode shape
+                modes.append((res.x, all_state_vecs))
 
         modes.sort(key=lambda x: x[0])
 
         logger.info(f"Found {len(modes)} natural modes up to {omega_max} rad/s.")
         for w, _ in modes:
-            logger.debug(f"Mode at {w:.4f} rad/s.")
+            logger.debug(f"Mode at {w:.3e} rad/s.")
 
         return modes[:n_modes]
+
+    def _propagate_state(self, z_red: Vector, omega: float, rtol: float = 1e-4) -> Vector:
+        """
+        Propagate state from the tips of the system, through the elements
+        (bodies and hinges) and up to the root.
+        Verify that the propagated state vector satisfies the boundary conditions at the root.
+        :param z_red:
+        :param omega:
+        :return:
+        """
+        log_prefix = f"Computing internal states at {omega:.3e} rad/s:"
+
+        boundary_svs = self.reconstruct_boundary_states(z_red)
+        root_sv = boundary_svs.pop(self.root.b_id)
+        tip_svs = boundary_svs
+
+        # Initialize search heads, traversal tracking, and state vectors for each element
+        search_heads = deque([t for t in self.tips])
+        searched = {k: False for k in self._elements}
+        state_vecs = defaultdict(
+            lambda: np.zeros(13),
+            tip_svs
+        )
+
+        while search_heads:
+            head_id = search_heads.popleft()
+            next_id = self._successor_in_tree[head_id]['next']
+
+            if next_id not in self._elements:
+                # Also synonymous with the next node being the root
+                continue
+            # Info about the next element
+            next_elem = self._elements[next_id]
+            input_slot = self.graph[head_id][next_id]['input_slot']
+            output_slot = self._successor_in_tree[next_id]['output_slot']
+            output_pos = next_elem.slots_pos[output_slot]
+            # Add to the output state vector of the next element
+            if input_slot is None:
+                sv = next_elem.u(output_pos, omega) @ state_vecs[head_id]
+            else:
+                sv = next_elem.u_ext(output_pos, input_slot) @ state_vecs[head_id]
+            state_vecs[next_id] += sv
+            # If the next element has already been used as a head, we don't need to add it again
+            if not searched[next_id]:
+                search_heads.append(next_id)
+                searched[next_id] = True
+
+        # Verify that all elements have been sweeped
+        searched_count = list(searched.values()).count(True)
+        msg = f"{log_prefix} swept through ({searched_count}/{len(searched)}) elements."
+        if searched_count != len(searched):
+            logger.error(msg)
+            raise RuntimeError(msg)
+        else:
+            logger.debug(msg)
+
+        # Verify that the propagated state vector satisfies the boundary conditions at the root
+        last_elem_id = next(self.graph.predecessors(self.root.b_id))
+
+        rerr = np.linalg.norm(state_vecs[last_elem_id] - root_sv)/np.linalg.norm(root_sv)
+        if rerr < rtol:
+            logger.debug(f"{log_prefix} propagated state matches root boundary state. Relative error = {rerr}")
+        else:
+            err_msg = f"{log_prefix} propagated state doesn't match root boundary state. Relative error = {rerr}"
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        # Add the root to the end of the dict
+        state_vecs[self.root.b_id] = root_sv
+
+        logger.info(f"{log_prefix} success.")
+
+        return state_vecs

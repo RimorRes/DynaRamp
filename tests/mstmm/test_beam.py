@@ -36,12 +36,15 @@ def create_cantilever_beam():
 
     return system
 
+
 def test_cantilever_beam():
     cant_beam = create_cantilever_beam()
     modes = cant_beam.natural_modes(7)
 
     for w, shape in modes:
         u, _ = cant_beam.overall_transfer(w)
-        z = null_space(u, rcond=1e-8).reshape(12)
+        z_red = null_space(u, rcond=1e-8).reshape(12)
 
-        assert np.allclose(np.abs(z), np.abs(shape))
+        bound_svs = cant_beam.reconstruct_boundary_states(z_red)
+
+        assert np.allclose(np.abs(bound_svs[cant_beam.root.b_id]), np.abs(shape[cant_beam.root.b_id]))

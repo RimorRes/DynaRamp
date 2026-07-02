@@ -7,7 +7,7 @@ import numpy as np
 
 from .structs import Element
 from ..vecmath import skew_sym_mat
-from ..common_types import EntityID, Vector, VectorLike, Matrix
+from ..common_types import EntityID, VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 

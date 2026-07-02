@@ -80,9 +80,9 @@ class Element(ABC):
         ])
 
         u_ext_extend = np.block([
-            [np.zeros((6, 6)), np.zeros((6, 7))],
+            [np.zeros((6, 13))],
             [np.zeros((6, 6)), transform, np.zeros((6, 1))],
-            [np.zeros((1, 12)), 1],
+            [np.zeros((1, 13))],
         ])
         return u_ext_extend
 
