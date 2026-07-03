@@ -271,7 +271,7 @@ class MBS:
 
         return self
 
-    def _find_cuts(self, graph: nx.DiGraph) -> List[Tuple[EntityID, EntityID]]:
+    def find_cuts(self, graph: nx.DiGraph) -> List[Tuple[EntityID, EntityID]]:
         # Identify and cut connections between elements to get a tree system
         # At this step a valid and unique root must be selected
 
@@ -298,7 +298,7 @@ class MBS:
         logger.info("Transforming system into a tree structure.")
 
         logger.debug(f"Auto resolving edges to cut.")
-        c2c = self._find_cuts(self.graph)
+        c2c = self.find_cuts(self.graph)
         for connection in c2c:
             self.cut_connection(connection)
 
@@ -335,7 +335,7 @@ class MBS:
 
         return self
 
-    def _resolve_branch_up_to(self, src: EntityID, tgt: EntityID) -> List[EntityID]:
+    def resolve_branch_up_to(self, src: EntityID, tgt: EntityID) -> List[EntityID]:
         """
         Return path from src to tgt (excluding tgt)
         :param src:
@@ -355,7 +355,7 @@ class MBS:
 
         return path
 
-    def _transfer_mat_along_path(self, path: Sequence[EntityID], omega: float) -> Matrix:
+    def transfer_mat_along_path(self, path: Sequence[EntityID], omega: float) -> Matrix:
         # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
         u_chain = np.identity(13)
 
@@ -377,8 +377,8 @@ class MBS:
 
     def _geometric_equation(self, tip_id: EntityID, mult_in_e_id: EntityID, omega: float) -> Matrix:
         try:
-            path = self._resolve_branch_up_to(src=tip_id, tgt=mult_in_e_id)
-            u_chain = self._transfer_mat_along_path(path, omega)
+            path = self.resolve_branch_up_to(src=tip_id, tgt=mult_in_e_id)
+            u_chain = self.transfer_mat_along_path(path, omega)
             input_slot = self.graph[path[-1]][mult_in_e_id]['input_slot']
             if input_slot is None:
                 g_mat = - self._elements[mult_in_e_id].h_ext @ u_chain
@@ -400,8 +400,8 @@ class MBS:
 
         t_mats = []
         for tip in tips:
-            path = self._resolve_branch_up_to(src=tip.b_id, tgt=self.root.b_id)
-            t_mats.append(self._transfer_mat_along_path(path, omega))
+            path = self.resolve_branch_up_to(src=tip.b_id, tgt=self.root.b_id)
+            t_mats.append(self.transfer_mat_along_path(path, omega))
 
         multi_input_elems = [e_id for e_id in self._elements if self.graph.in_degree(e_id) > 1]
 
@@ -530,7 +530,7 @@ class MBS:
                          f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
             # If rcond passes the tolerance, save the frequency and mode shape
             if rcond < rtol:
-                all_state_vecs = self._propagate_state(z_red=vh[-1], omega=res.x)   # or Vh[-1].T for the mode shape
+                all_state_vecs = self.propagate_state(z_red=vh[-1], omega=res.x)   # or Vh[-1].T for the mode shape
                 modes.append((res.x, all_state_vecs))
 
         modes.sort(key=lambda x: x[0])
@@ -541,13 +541,14 @@ class MBS:
 
         return modes[:n_modes]
 
-    def _propagate_state(self, z_red: Vector, omega: float, rtol: float = 1e-4) -> Vector:
+    def propagate_state(self, z_red: Vector, omega: float, rtol: float = 1e-4) -> Dict[EntityID, Vector]:
         """
         Propagate state from the tips of the system, through the elements
         (bodies and hinges) and up to the root.
         Verify that the propagated state vector satisfies the boundary conditions at the root.
         :param z_red:
         :param omega:
+        :param rtol:
         :return:
         """
         log_prefix = f"Computing internal states at {omega:.3e} rad/s:"
