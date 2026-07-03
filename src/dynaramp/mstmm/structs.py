@@ -118,10 +118,10 @@ class Boundary:
 class CutPoint:
     b_id1: EntityID
     b_id2: EntityID
-    sign_matrix: bool = True
+    sign_mat_flag: bool = True
     mat: Matrix = field(init=False)
 
     def __post_init__(self):
         self.mat = np.identity(13)
-        if self.sign_matrix:
+        if self.sign_mat_flag:
             self.mat[6:12, 6:12] *= -1

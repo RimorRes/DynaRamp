@@ -42,9 +42,11 @@ def test_cantilever_beam():
     modes = cant_beam.natural_modes(7)
 
     for w, shape in modes:
-        u, _ = cant_beam.overall_transfer(w)
+        u, f, rem_bounds = cant_beam.overall_transfer(w)
+        assert np.allclose(f, 0)
+
         z_red = null_space(u, rcond=1e-8).reshape(12)
 
-        bound_svs = cant_beam.reconstruct_boundary_states(z_red)
+        bound_svs = cant_beam.reconstruct_boundary_states(z_red, rem_bounds)
 
         assert np.allclose(np.abs(bound_svs[cant_beam.root.b_id]), np.abs(shape[cant_beam.root.b_id]))

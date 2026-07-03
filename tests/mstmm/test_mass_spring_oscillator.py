@@ -68,7 +68,7 @@ def create_mass_spring_oscillator():
 
 def test_mass_spring_oscillator():
     oscillator = create_mass_spring_oscillator()
-    u, f = oscillator.overall_transfer(1.236)
+    u, f, _ = oscillator.overall_transfer(1.236)
     assert np.allclose(f, 0)
 
     modes = oscillator.natural_modes(2, omega_max=50)

@@ -25,7 +25,7 @@ class MBS:
         self._slot_occupancy: Dict[EntityID, Dict[EntityID | None, str | None]] = {}  # 'input', 'output' or None
 
         self._root: Boundary | None = None
-        self._boundaries: Dict[EntityID, Boundary] = {}
+        self._tips: Dict[EntityID, Boundary] = {}
         self._cut_points: List[CutPoint] = []
 
         self.graph: nx.DiGraph = nx.DiGraph()
@@ -46,13 +46,13 @@ class MBS:
             return self._root
 
     @property
-    def boundaries(self) -> Dict[EntityID, Boundary]:
-        return self._boundaries
+    def tips(self) -> Dict[EntityID, Boundary]:
+        return self._tips
 
     @property
-    def tips(self) -> Dict[EntityID, Boundary]:
-        # TODO: Optimize
-        return {b_id: b for b_id, b in self._boundaries.items() if b is not self.root}
+    def boundaries(self) -> List[EntityID]:
+        # Sort the boundaries -> [root, tip1, tip2, ...]
+        return [self.root.b_id] + [t_id for t_id in self._tips]
 
     @property
     def z_all(self) -> Vector:
@@ -119,11 +119,12 @@ class MBS:
             raise KeyError(err_msg)
 
         root_boundary = Boundary(b_id=f"{tgt_id}.{output_slot}, 0", state_vector=boundary_sv)
+        # Cache the new root
         self._root = root_boundary
-        self._boundaries[root_boundary.b_id] = root_boundary
+        self._slot_occupancy[tgt_id][output_slot] = 'output'
+        # Add it to the graph
         self.graph.add_node(root_boundary.b_id)
         self.graph.add_edge(tgt_id, root_boundary.b_id, output_slot=output_slot, input_slot=None)
-        self._slot_occupancy[tgt_id][output_slot] = 'output'
 
         logger.debug(f"Added [{root_boundary.b_id}] as the root boundary to element [{tgt_id}].")
 
@@ -138,10 +139,12 @@ class MBS:
             raise KeyError(err_msg)
 
         tip_boundary = Boundary(b_id=f"{tgt_id}.{input_slot}, 0", state_vector=boundary_sv)
-        self._boundaries[tip_boundary.b_id] = tip_boundary
+        # Cache the new tip boundary
+        self._tips[tip_boundary.b_id] = tip_boundary
+        self._slot_occupancy[tgt_id][input_slot] = 'input'
+        # Add to graph
         self.graph.add_node(tip_boundary.b_id)
         self.graph.add_edge(tip_boundary.b_id, tgt_id, output_slot=None, input_slot=input_slot)
-        self._slot_occupancy[tgt_id][input_slot] = 'input'
 
         logger.debug(f"Added [{tip_boundary.b_id}] as a tip boundary to element [{tgt_id}].")
 
@@ -214,6 +217,11 @@ class MBS:
         return self
 
     def cut_connection(self, connection: Iterable[ElemLike]) -> MBS:
+        """
+        "Cutting the hinge" i.e., generating virtual tips to account for multi-output or looping elements
+        :param connection:
+        :return:
+        """
 
         src_id, dst_id = map(self._resolve_elem_id, connection)
         log_prefix = f"Cutting [{src_id}] -/> [{dst_id}]:"
@@ -226,7 +234,7 @@ class MBS:
             logger.error(err_msg)
             raise KeyError(err_msg)
 
-        if src_id in self._boundaries or dst_id in self._boundaries:
+        if src_id in self._tips or dst_id in self._tips or src_id == self.root.b_id or dst_id == self.root.b_id:
             err_msg = f"{log_prefix} cannot cut a connection with a boundary."
             logger.error(err_msg)
             raise ValueError(err_msg)
@@ -239,9 +247,11 @@ class MBS:
                     in_cycle = True
             if in_cycle:
                 try:
+                    # TODO: It would be mathematically equivalent to have root in b_id2,
+                    # but it makes more sense to conserve the root during reduction
                     b_id1 = self.add_root(np.full(13, None), self._elements[src_id], src_slot)
                     b_id2 = self.add_tip(np.full(13, None), self._elements[dst_id], dst_slot)
-                    # Cutting a connection in this case generates a new INPUT and OUTPUT.
+                    # Cutting a connection in this case generates a new virtual INPUT/OUTPUT pair.
                     # No C sign matrix will be needed. Both state vectors are equal
                     cut = CutPoint(b_id1, b_id2, False)
                     logger.info(f"{log_prefix} cut closed loop. Created new root [{b_id1}] and tip [{b_id2}].")
@@ -258,7 +268,7 @@ class MBS:
         else:
             b_id1 = self.add_tip(np.full(13, None), self._elements[src_id], src_slot)
             b_id2 = self.add_tip(np.full(13, None), self._elements[dst_id], dst_slot)
-            # Cutting a connection in this case generates two new INPUT tips/boundaries.
+            # Cutting a connection in this case generates two new virtual INPUT tips/boundaries.
             # C sign matrix will be needed
             cut = CutPoint(b_id1, b_id2)
             logger.debug(f"{log_prefix} cut connection. Created new tips [{b_id1}] and [{b_id2}].")
@@ -325,11 +335,9 @@ class MBS:
             )
             self._successor_in_tree[e] = {'output_slot': out_slot, 'next': successor}
         # Same operation on the tips (we exclude the root as it has no output)
-        for b_id, boundary in self._boundaries.items():
-            if boundary is self.root:
-                continue
-            successor = next(iter(self.graph[b_id]))
-            self._successor_in_tree[b_id] = {'output_slot': None, 'next': successor}
+        for t_id in self._tips:
+            successor = next(iter(self.graph[t_id]))
+            self._successor_in_tree[t_id] = {'output_slot': None, 'next': successor}
 
         logger.info("Successfully built valid tree system.")
 
@@ -388,37 +396,39 @@ class MBS:
         except ValueError:
             return np.zeros((6, 13))
 
-    def overall_transfer(self, omega) -> Tuple[Matrix, Vector]:
+    def overall_transfer(self, omega) -> Tuple[Matrix, Vector, List[EntityID]]:
         """
 
         :param omega:
         :return:
         """
-
-        # Sort the boundaries -> [root, tip1, tip2, ...]
-        tips = [b for b in self._boundaries.values() if b is not self.root]
+        remaining_boundaries = self.boundaries  # Tracks what boundary vectors are actually still in z_red
 
         t_mats = []
-        for tip in tips:
-            path = self.resolve_branch_up_to(src=tip.b_id, tgt=self.root.b_id)
+        for t_id in self._tips:
+            path = self.resolve_branch_up_to(src=t_id, tgt=self.root.b_id)
             t_mats.append(self.transfer_mat_along_path(path, omega))
 
         multi_input_elems = [e_id for e_id in self._elements if self.graph.in_degree(e_id) > 1]
 
         if multi_input_elems:
             g_cols = []
-            for tip in tips:
+            for t_id in self._tips:
                 col = []
                 for mult_in_e_id in multi_input_elems:
-                    col.append(self._geometric_equation(tip.b_id, mult_in_e_id, omega))
+                    col.append(self._geometric_equation(t_id, mult_in_e_id, omega))
                 g_cols.append(np.vstack(col))
 
-            # Condense columns at cut points
+            # Condense columns using the cut-point relations
+            # TODO: Fix potential error regarding root/tip pair generated from a closed loop
             for cut in self._cut_points:
-                # Find the index of the cut's tip boundaries in the tip list
+                # Find the index of the cut's virtual boundaries.
                 try:
-                    idx1 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id1)
-                    idx2 = next(i for i, b in enumerate(tips) if b.b_id == cut.b_id2)
+                    idx1 = next(i for i, b_id in enumerate(remaining_boundaries) if b_id == cut.b_id1)
+                    idx2 = next(i for i, b_id in enumerate(remaining_boundaries) if b_id == cut.b_id2)
+                    # TODO: mathematically equivalent but need to check if the code can work with indices switched
+                    if remaining_boundaries[idx2] == self.root.b_id:
+                        idx1, idx2 = idx2, idx1
                 except StopIteration:
                     err_msg = f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips."
                     logger.error(err_msg)
@@ -430,7 +440,7 @@ class MBS:
                 g_cols[idx1] += g_cols[idx2] @ cut.mat
                 g_cols.pop(idx2)
 
-                tips.pop(idx2)
+                remaining_boundaries.pop(idx2)
 
             t_block = np.hstack(t_mats)
             g_block = np.hstack(g_cols)
@@ -465,23 +475,33 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        return u_red, f
+        return u_red, f, remaining_boundaries
 
-    def reconstruct_boundary_states(self, z_red: Vector) -> Dict[EntityID, Vector]:
-        # Rebuild the overall state vector from the computed reduced state
-        z_all_full = np.empty(self.z_all.shape, dtype=np.float64)
+    def reconstruct_boundary_states(self, z_red: Vector, rem_boundary_ids: List[EntityID]) -> Dict[EntityID, Vector]:
+        # Fill in the reduced overall state vector with the computed values
+        z_red_full = np.empty(self.z_all.shape, dtype=np.float64)
         z_red_iter = iter(z_red)
         for i, x in enumerate(self.z_all):
             if x is None:
-                z_all_full[i] = next(z_red_iter)
+                z_red_full[i] = next(z_red_iter)
             else:
-                z_all_full[i] = x
-        # Decompose z_all_full into it's component state vectors for each boundary
-        bound_svs = z_all_full.reshape((len(self._boundaries), 13))
+                z_red_full[i] = x
+        # Decompose z_red_full into it's component state vectors
+        z_red_full = z_red_full.reshape((len(rem_boundary_ids), 13))
+        rem_boundaries = {rem_boundary_ids[i]: sv for i, sv in enumerate(z_red_full)}
+        # Expand the reduced vector back to full size by reintroducing eliminated virtual boundaries
+        eliminated_boundaries = {}
+        for c in self._cut_points:
+            eliminated_boundaries[c.b_id2] = c.mat @ rem_boundaries[c.b_id1]
+        # We need to build the final dict in the correct order
+        bound_svs = {}
+        for b_id in self.boundaries:
+            if b_id in rem_boundary_ids:
+                bound_svs[b_id] = rem_boundaries[b_id]
+            else:
+                bound_svs[b_id] = eliminated_boundaries[b_id]
 
-        keys = [self.root.b_id] + [t for t in self.tips]
-
-        return {keys[i]: sv for i, sv in enumerate(bound_svs)}
+        return bound_svs
 
     def _sigma_min(self, omega: float) -> float:
         """
@@ -521,7 +541,7 @@ class MBS:
                 method="bounded"
             )
             # Apply SVD to the transfer matrix at the refined frequency
-            u = self.overall_transfer(res.x)[0]
+            u, _, rem_bounds = self.overall_transfer(res.x)
             _, s, vh = np.linalg.svd(u)
             # Reciprocal condition number
             rcond = s[-1] / s[0]
@@ -530,7 +550,8 @@ class MBS:
                          f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
             # If rcond passes the tolerance, save the frequency and mode shape
             if rcond < rtol:
-                all_state_vecs = self.propagate_state(z_red=vh[-1], omega=res.x)   # or Vh[-1].T for the mode shape
+                all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1],
+                                                      rem_boundary_ids=rem_bounds)  # or Vh[-1].T for the mode shape
                 modes.append((res.x, all_state_vecs))
 
         modes.sort(key=lambda x: x[0])
@@ -541,19 +562,26 @@ class MBS:
 
         return modes[:n_modes]
 
-    def propagate_state(self, z_red: Vector, omega: float, rtol: float = 1e-4) -> Dict[EntityID, Vector]:
+    def propagate_state(
+            self,
+            omega: float,
+            z_red: Vector,
+            rem_boundary_ids: List[EntityID],
+            rtol: float = 1e-4
+    ) -> Dict[EntityID, Vector]:
         """
         Propagate state from the tips of the system, through the elements
         (bodies and hinges) and up to the root.
         Verify that the propagated state vector satisfies the boundary conditions at the root.
-        :param z_red:
         :param omega:
+        :param z_red:
+        :param rem_boundary_ids:
         :param rtol:
         :return:
         """
         log_prefix = f"Computing internal states at {omega:.3e} rad/s:"
 
-        boundary_svs = self.reconstruct_boundary_states(z_red)
+        boundary_svs = self.reconstruct_boundary_states(z_red, rem_boundary_ids)
         root_sv = boundary_svs.pop(self.root.b_id)
         tip_svs = boundary_svs
 
