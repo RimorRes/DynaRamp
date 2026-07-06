@@ -6,6 +6,7 @@ from collections import deque, defaultdict
 
 import networkx as nx
 import numpy as np
+from matplotlib import pyplot as plt
 from scipy.signal import find_peaks
 from scipy.optimize import minimize_scalar
 
@@ -402,58 +403,60 @@ class MBS:
         :param omega:
         :return:
         """
-        remaining_boundaries = self.boundaries  # Tracks what boundary vectors are actually still in z_red
 
-        t_mats = []
+        t_mats = [- np.identity(13)]  # init with root
         for t_id in self._tips:
             path = self.resolve_branch_up_to(src=t_id, tgt=self.root.b_id)
             t_mats.append(self.transfer_mat_along_path(path, omega))
 
         multi_input_elems = [e_id for e_id in self._elements if self.graph.in_degree(e_id) > 1]
+        g_cols = []
 
         if multi_input_elems:
-            g_cols = []
             for t_id in self._tips:
                 col = []
                 for mult_in_e_id in multi_input_elems:
                     col.append(self._geometric_equation(t_id, mult_in_e_id, omega))
                 g_cols.append(np.vstack(col))
 
-            # Condense columns using the cut-point relations
-            # TODO: Fix potential error regarding root/tip pair generated from a closed loop
-            for cut in self._cut_points:
-                # Find the index of the cut's virtual boundaries.
-                try:
-                    idx1 = next(i for i, b_id in enumerate(remaining_boundaries) if b_id == cut.b_id1)
-                    idx2 = next(i for i, b_id in enumerate(remaining_boundaries) if b_id == cut.b_id2)
-                    # TODO: mathematically equivalent but need to check if the code can work with indices switched
-                    if remaining_boundaries[idx2] == self.root.b_id:
-                        idx1, idx2 = idx2, idx1
-                except StopIteration:
-                    err_msg = f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips."
-                    logger.error(err_msg)
-                    raise ValueError(err_msg)
+        # Condense columns using the cut-point relations
+        # TODO: Move to a separate function
+        remaining_boundaries = self.boundaries  # Tracks what boundary vectors are actually still in z_red
+        # TODO: Fix potential error regarding root/tip pair generated from a closed loop
+        for cut in self._cut_points:
+            # Find the index of the cut's virtual boundaries.
+            try:
+                idx1 = next(i for i, b_id in enumerate(remaining_boundaries) if b_id == cut.b_id1)
+                idx2 = next(i for i, b_id in enumerate(remaining_boundaries) if b_id == cut.b_id2)
+                # TODO: mathematically equivalent but need to check if the code can work with indices switched
+                if remaining_boundaries[idx2] == self.root.b_id:
+                    idx1, idx2 = idx2, idx1
+            except StopIteration:
+                err_msg = f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips."
+                logger.error(err_msg)
+                raise ValueError(err_msg)
 
-                t_mats[idx1] += t_mats[idx2] @ cut.mat
-                t_mats.pop(idx2)
+            t_mats[idx1] += t_mats[idx2] @ cut.mat
+            t_mats.pop(idx2)
 
+            if multi_input_elems:
                 g_cols[idx1] += g_cols[idx2] @ cut.mat
                 g_cols.pop(idx2)
 
-                remaining_boundaries.pop(idx2)
+            remaining_boundaries.pop(idx2)
 
-            t_block = np.hstack(t_mats)
+        # Assemble full-sized overall transfer matrix
+        t_block = np.hstack(t_mats)
+        if multi_input_elems:
             g_block = np.hstack(g_cols)
-
             u_all = np.block([
-                [- np.identity(13), t_block],
+                [t_block],
                 [np.zeros((g_block.shape[0], 13)), g_block],
             ])
         else:
-            t_block = np.hstack(t_mats)
-            u_all = np.block([
-                - np.identity(13), t_block
-            ])
+            u_all = np.block(
+                t_block
+            )
 
         # Handle known boundary conditions
         known_mask = np.array([x is not None for x in self.z_all])
@@ -525,6 +528,8 @@ class MBS:
 
         omega = np.linspace(0, omega_max, search_res)[1:]  # skip omega = 0
         sigma = np.array([self._sigma_min(w) for w in omega])
+        plt.plot(omega, sigma)
+        plt.show()
         # Find rough peaks corresponding to the smallest singular values
         prominence = 5e-2 * np.max(sigma)
         candidates, _ = find_peaks(-sigma, prominence=prominence)
