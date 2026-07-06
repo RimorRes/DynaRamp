@@ -6,7 +6,6 @@ from collections import deque, defaultdict
 
 import networkx as nx
 import numpy as np
-from matplotlib import pyplot as plt
 from scipy.signal import find_peaks
 from scipy.optimize import minimize_scalar
 
@@ -447,9 +446,7 @@ class MBS:
             remaining_boundaries.pop(idx2)
 
         # Assemble full-sized overall transfer matrix
-        t_block = np.hstack(t_mats)
         if multi_input_elems:
-            g_block = np.hstack(g_cols)
             u_all = np.block([
                 t_mats,
                 g_cols
@@ -527,8 +524,6 @@ class MBS:
 
         omega = np.linspace(0, omega_max, search_res)[1:]  # skip omega = 0
         sigma = np.array([self._sigma_min(w) for w in omega])
-        plt.plot(omega, sigma)
-        plt.show()
         # Find rough peaks corresponding to the smallest singular values
         prominence = 5e-2 * np.max(sigma)
         candidates, _ = find_peaks(-sigma, prominence=prominence)

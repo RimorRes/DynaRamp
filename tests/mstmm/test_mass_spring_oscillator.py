@@ -71,15 +71,17 @@ def create_parallel_mass_spring_oscillator(n):
     m = 5
     s = 1
     unit_inertia = 1 / 6 * s ** 2 * np.eye(3)
+    slot_coords = {
+        'output': (0, 0, s)
+    }
+    for i in range(n):
+        slot_coords['aux' + str(i)] = (0, 0, 0)
     mass_elem = dyn.RigidBody(
         e_id='mass',
         mass=m,
         inertia=m * unit_inertia,
         com=(0, 0, s / 2),
-        slot_coords={
-            'aux_in': (0, 0, 0),
-            'output': (0, 0, s)
-        }
+        slot_coords=slot_coords
     )
 
     length = 1
@@ -111,7 +113,6 @@ def create_parallel_mass_spring_oscillator(n):
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
-
     system.add_root(root_boundary, mass_elem, 'output')
 
     system.make_tree()
@@ -135,7 +136,8 @@ def test_mass_spring_oscillator():
     assert np.allclose(ws, [omega1, omega2], rtol=1e-3)
 
 def test_parallel_mass_spring_oscillator():
-    oscillator = create_parallel_mass_spring_oscillator(n=4)
+    n = 3
+    oscillator = create_parallel_mass_spring_oscillator(n)
     u, f, _ = oscillator.overall_transfer(5)
     assert np.allclose(f, 0)
 
@@ -143,5 +145,5 @@ def test_parallel_mass_spring_oscillator():
     # Theoretical natural frequency for a mass-spring system with one mass and two identical springs in parallel
     k = 20
     m = 5
-    omega = np.sqrt(2*k/m)
+    omega = np.sqrt(n*k/m)
     assert np.allclose(mode[0], omega, rtol=1e-3)
