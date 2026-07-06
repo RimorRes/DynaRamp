@@ -65,7 +65,7 @@ def create_mass_spring_oscillator():
 
     return system
 
-def create_parallel_mass_spring_oscillator():
+def create_parallel_mass_spring_oscillator(n):
     system = dyn.MBS()
 
     m = 5
@@ -84,36 +84,35 @@ def create_parallel_mass_spring_oscillator():
 
     length = 1
     k = 20
-    spring_elem1 = dyn.SpatialElasticHinge(
-        e_id='spring1',
-        k=(np.inf, np.inf, k),
-        k_rot=(np.inf, np.inf, np.inf),
-        slot_coords={
-            'output': (0, 0, length)
-        }
-    )
+    k_penalty = 1e5
+    spring_elems=[]
+    for i in range(n):
+        i_spring = dyn.SpatialElasticHinge(
+            e_id='spring' + str(i),
+            k=(k_penalty, k_penalty, k),
+            k_rot=(k_penalty, k_penalty, k_penalty),
+            slot_coords={
+                'output': (0, 0, length)
+            }
+        )
+        spring_elems.append(i_spring)
 
-    spring_elem2 = dyn.SpatialElasticHinge(
-        e_id='spring2',
-        k=(np.inf, np.inf, k),
-        k_rot=(np.inf, np.inf, np.inf),
-        slot_coords={
-            'output': (0, 0, length)
-        }
-    )
+    system.add_elements(mass_elem)
 
-    system.add_elements([spring_elem1, spring_elem2, mass_elem])
-    system.connect_elements(spring_elem1, mass_elem, src_slot='output', dst_slot=None)
-    system.connect_elements(spring_elem2, mass_elem, src_slot='output', dst_slot='aux_in')
+    system.add_elements(spring_elems)
+    for i, spring in enumerate(spring_elems):
+        if i == 0:
+            dst = None
+        else:
+            dst = 'aux' + str(i)
+        system.connect_elements(spring, mass_elem, src_slot='output', dst_slot=dst)
+        tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
+        system.add_tip(tip_boundary, spring, None)
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
-    tip_boundary1 = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
-    tip_boundary2 = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
     system.add_root(root_boundary, mass_elem, 'output')
-    system.add_tip(tip_boundary1, spring_elem1, None)
-    system.add_tip(tip_boundary2, spring_elem2, None)
 
     system.make_tree()
 
@@ -136,11 +135,11 @@ def test_mass_spring_oscillator():
     assert np.allclose(ws, [omega1, omega2], rtol=1e-3)
 
 def test_parallel_mass_spring_oscillator():
-    oscillator = create_parallel_mass_spring_oscillator()
+    oscillator = create_parallel_mass_spring_oscillator(n=4)
     u, f, _ = oscillator.overall_transfer(5)
     assert np.allclose(f, 0)
 
-    mode = oscillator.natural_modes(1, omega_max=10)[0]
+    mode = oscillator.natural_modes(1, omega_max=5)[0]
     # Theoretical natural frequency for a mass-spring system with one mass and two identical springs in parallel
     k = 20
     m = 5

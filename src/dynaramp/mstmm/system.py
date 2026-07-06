@@ -413,6 +413,7 @@ class MBS:
         g_cols = []
 
         if multi_input_elems:
+            g_cols.append(np.zeros((6*len(multi_input_elems), 13), dtype=np.float64))
             for t_id in self._tips:
                 col = []
                 for mult_in_e_id in multi_input_elems:
@@ -450,13 +451,11 @@ class MBS:
         if multi_input_elems:
             g_block = np.hstack(g_cols)
             u_all = np.block([
-                [t_block],
-                [np.zeros((g_block.shape[0], 13)), g_block],
+                t_mats,
+                g_cols
             ])
         else:
-            u_all = np.block(
-                t_block
-            )
+            u_all = np.block(t_mats)
 
         # Handle known boundary conditions
         known_mask = np.array([x is not None for x in self.z_all])
