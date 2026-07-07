@@ -65,6 +65,7 @@ def create_mass_spring_oscillator():
 
     return system
 
+
 def create_parallel_mass_spring_oscillator(n):
     system = dyn.MBS()
 
@@ -87,7 +88,7 @@ def create_parallel_mass_spring_oscillator(n):
     length = 1
     k = 20
     k_penalty = 1e5
-    spring_elems=[]
+    spring_elems = []
     for i in range(n):
         i_spring = dyn.SpatialElasticHinge(
             e_id='spring' + str(i),
@@ -135,15 +136,20 @@ def test_mass_spring_oscillator():
     omega2 = np.sqrt(k/(2*m1) * (2 + (m1/m2) + np.sqrt(4 + (m1/m2)**2)))
     assert np.allclose(ws, [omega1, omega2], rtol=1e-3)
 
+
 def test_parallel_mass_spring_oscillator():
     n = 3
+    k = 20
+    m = 5
+    # Theoretical natural frequency for a mass-spring system with one mass and two identical springs in parallel
+    omega = np.sqrt(n*k/m)
+    omega_min = omega - 1
+    omega_max = omega + 1
+
     oscillator = create_parallel_mass_spring_oscillator(n)
     u, f, _ = oscillator.overall_transfer(5)
     assert np.allclose(f, 0)
 
-    mode = oscillator.natural_modes(1, omega_max=5)[0]
-    # Theoretical natural frequency for a mass-spring system with one mass and two identical springs in parallel
-    k = 20
-    m = 5
-    omega = np.sqrt(n*k/m)
+    mode = oscillator.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
+
     assert np.allclose(mode[0], omega, rtol=1e-3)

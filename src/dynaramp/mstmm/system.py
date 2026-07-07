@@ -28,13 +28,19 @@ class MBS:
         self._tips: Dict[EntityID, Boundary] = {}
         self._cut_points: List[CutPoint] = []
 
+        self._z_all = np.array([], dtype=np.float64)  # Overall state vector (concatenated boundary vectors)
+        self._z_all_cache_invalid = True  # Flag to indicate if the overall state vector needs to be recomputed
+
         self.graph: nx.DiGraph = nx.DiGraph()
+        self._tree: nx.DiGraph = nx.DiGraph()
+        self._tree_generated = False
         self._successor_in_tree = {}
 
     # Read-only attributes
     @property
     def elements(self) -> Dict[EntityID, Element]:
-        return self._elements
+        # Return a copy to avoid accidental mutation of internal state
+        return self._elements.copy()
 
     @property
     def root(self) -> Boundary:
@@ -47,17 +53,33 @@ class MBS:
 
     @property
     def tips(self) -> Dict[EntityID, Boundary]:
-        return self._tips
+        # Return a copy to avoid accidental mutation of internal state
+        return self._tips.copy()
 
     @property
     def boundaries(self) -> List[EntityID]:
         # Sort the boundaries -> [root, tip1, tip2, ...]
+        # Purposefully not cached. Every call generates a new list to avoid accidental mutations/side effects.
         return [self.root.b_id] + [t_id for t_id in self._tips]
 
     @property
+    def tree(self):
+        if self._tree_generated:
+            return self._tree
+        else:
+            err_msg = "Tree not generated."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+    @property
     def z_all(self) -> Vector:
-        # TODO: Optimize
-        return np.hstack([self.root.state_vector] + [b.state_vector for b in self.tips.values()])
+        # Should only be called once all boundaries are defined (especially root as this would otherwise throw an error)
+        if self._z_all_cache_invalid:  # Recompute cached value as needed
+            z = np.hstack([self.root.state_vector] + [b.state_vector for b in self._tips.values()])
+            z.setflags(write=False)  # Make the aray read-only
+            self._z_all = z
+            self._z_all_cache_invalid = False
+        return self._z_all
 
     @staticmethod
     def _resolve_elem_id(elem_or_eid: ElemLike) -> EntityID:
@@ -122,6 +144,7 @@ class MBS:
         # Cache the new root
         self._root = root_boundary
         self._slot_occupancy[tgt_id][output_slot] = 'output'
+        self._z_all_cache_invalid = True
         # Add it to the graph
         self.graph.add_node(root_boundary.b_id)
         self.graph.add_edge(tgt_id, root_boundary.b_id, output_slot=output_slot, input_slot=None)
@@ -142,6 +165,7 @@ class MBS:
         # Cache the new tip boundary
         self._tips[tip_boundary.b_id] = tip_boundary
         self._slot_occupancy[tgt_id][input_slot] = 'input'
+        self._z_all_cache_invalid = True
         # Add to graph
         self.graph.add_node(tip_boundary.b_id)
         self.graph.add_edge(tip_boundary.b_id, tgt_id, output_slot=None, input_slot=input_slot)
@@ -216,9 +240,10 @@ class MBS:
 
         return self
 
-    def cut_connection(self, connection: Iterable[ElemLike]) -> MBS:
+    def cut_connection(self, graph: nx.DiGraph[EntityID], connection: Iterable[ElemLike]) -> MBS:
         """
         "Cutting the hinge" i.e., generating virtual tips to account for multi-output or looping elements
+        :param graph: graph to modify
         :param connection:
         :return:
         """
@@ -227,8 +252,8 @@ class MBS:
         log_prefix = f"Cutting [{src_id}] -/> [{dst_id}]:"
 
         try:
-            src_slot = self.graph[src_id][dst_id]['output_slot']
-            dst_slot = self.graph[src_id][dst_id]['input_slot']
+            src_slot = graph[src_id][dst_id]['output_slot']
+            dst_slot = graph[src_id][dst_id]['input_slot']
         except KeyError:
             err_msg = f"{log_prefix} specified connection does not exist in the system."
             logger.error(err_msg)
@@ -239,15 +264,15 @@ class MBS:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        if self.graph.out_degree(src_id) == 1:
+        if graph.out_degree(src_id) == 1:
             # Check if node is in a directed cycle
             in_cycle = False
-            for scc in nx.strongly_connected_components(self.graph):
+            for scc in nx.strongly_connected_components(graph):
                 if src_id in scc and len(scc) > 1:
                     in_cycle = True
             if in_cycle:
                 try:
-                    # TODO: It would be mathematically equivalent to have root in b_id2,
+                    # It would be mathematically equivalent to have root in b_id2,
                     # but it makes more sense to conserve the root during reduction
                     b_id1 = self.add_root(np.full(13, None), self._elements[src_id], src_slot)
                     b_id2 = self.add_tip(np.full(13, None), self._elements[dst_id], dst_slot)
@@ -275,7 +300,7 @@ class MBS:
 
         # clean up the old edge and save the cutting point relation
         self._cut_points.append(cut)
-        self.graph.remove_edge(src_id, dst_id)
+        graph.remove_edge(src_id, dst_id)
         logger.debug(f"{log_prefix}: old edge removed.")
         logger.info(f"{log_prefix} done.")
 
@@ -306,11 +331,12 @@ class MBS:
 
     def make_tree(self) -> MBS:
         logger.info("Transforming system into a tree structure.")
+        tree = self.graph.copy()
 
         logger.debug(f"Auto resolving edges to cut.")
-        c2c = self.find_cuts(self.graph)
+        c2c = self.find_cuts(self.graph)  # Connections to cut
         for connection in c2c:
-            self.cut_connection(connection)
+            self.cut_connection(tree, connection)
 
         # Check that we have a correct tree system
         # The actual check needs to be run on a reversed view of the graph since the root is the sink, not the source.
@@ -318,7 +344,7 @@ class MBS:
         # but with the current algorithm any element node with in_degree == 0 would be disconnected
         # (only tips can verify this condition and be connected as they are not internal nodes);
         # ergo this effectively validates the tree structure where every element has exactly one ouput.
-        if not nx.is_arborescence(nx.reverse_view(self.graph)):
+        if not nx.is_arborescence(nx.reverse_view(tree)):
             err_msg = f"Invalid topology. Could not transform system into a tree."
             logger.error(err_msg)
             raise ValueError(err_msg)
@@ -327,7 +353,7 @@ class MBS:
 
         # Buffer the output slot of all element/boundary nodes to speed up the transfer matrix calculations
         for e in self._elements:
-            successor = next(iter(self.graph[e]))
+            successor = next(iter(tree[e]))
             out_slot = next(
                 slot
                 for slot, value in self._slot_occupancy[e].items()
@@ -336,10 +362,12 @@ class MBS:
             self._successor_in_tree[e] = {'output_slot': out_slot, 'next': successor}
         # Same operation on the tips (we exclude the root as it has no output)
         for t_id in self._tips:
-            successor = next(iter(self.graph[t_id]))
+            successor = next(iter(tree[t_id]))
             self._successor_in_tree[t_id] = {'output_slot': None, 'next': successor}
 
         logger.info("Successfully built valid tree system.")
+        self._tree = tree
+        self._tree_generated = True
 
         return self
 
@@ -371,7 +399,7 @@ class MBS:
             e1, e2 = path[i], path[i + 1]
 
             e2_elem = self._elements[e2]
-            input_slot = self.graph[e1][e2]['input_slot']
+            input_slot = self.tree[e1][e2]['input_slot']
             # Retrieve the position of the output
             output_slot = self._successor_in_tree[e2]['output_slot']
             out_pos = e2_elem.slots_pos[output_slot]
@@ -383,18 +411,99 @@ class MBS:
 
         return u_chain
 
-    def _geometric_equation(self, tip_id: EntityID, mult_in_e_id: EntityID, omega: float) -> Matrix:
-        try:
-            path = self.resolve_branch_up_to(src=tip_id, tgt=mult_in_e_id)
-            u_chain = self.transfer_mat_along_path(path, omega)
-            input_slot = self.graph[path[-1]][mult_in_e_id]['input_slot']
-            if input_slot is None:
-                g_mat = - self._elements[mult_in_e_id].h_ext @ u_chain
-            else:
-                g_mat = self._elements[mult_in_e_id].h_incs[input_slot] @ u_chain
-            return g_mat
-        except ValueError:
-            return np.zeros((6, 13))
+    def _get_geometric_constraints(
+            self,
+            boundaries: List[EntityID],
+            omega: float
+    ) -> List[Matrix]:
+        """
+
+        :param boundaries:
+        :param omega:
+        :return:
+        """
+        multi_input_elems = [e_id for e_id in self._elements if self.tree.in_degree(e_id) > 1]
+        # Initialize dictionary columns for every boundary (guarantees Root gets zeros automatically)
+        g_cols_dict = {b_id: [] for b_id in boundaries}
+
+        for m_id in multi_input_elems:
+            # Retrieve the N incoming branches
+            preds = list(self.tree.predecessors(m_id))
+            if len(preds) <= 1:
+                continue
+
+            # Group tips by the immediate incoming branch they pass through
+            tips_by_branch = {p: [] for p in preds}
+            k_mats = {}
+
+            for t_id in self._tips:
+                try:
+                    path = self.resolve_branch_up_to(src=t_id, tgt=m_id)
+                    branch_node = path[-1]
+                    if branch_node in tips_by_branch:
+                        tips_by_branch[branch_node].append(t_id)
+
+                    # Extract the pure kinematics transformation matrix (no negative signs!)
+                    u_chain = self.transfer_mat_along_path(path, omega)
+                    input_slot = self.tree[branch_node][m_id]['input_slot']
+                    if input_slot is None:
+                        k_mat = self._elements[m_id].h_ext @ u_chain
+                    else:
+                        k_mat = self._elements[m_id].h_incs[input_slot] @ u_chain
+                    k_mats[t_id] = k_mat
+                except ValueError:
+                    continue
+
+            # Generate exactly (N - 1) sets of geometric constraints
+            ref_pred = preds[0]
+            for other_pred in preds[1:]:
+                for b_id in boundaries:
+                    if b_id in tips_by_branch[ref_pred]:
+                        g_cols_dict[b_id].append(k_mats[b_id])
+                    elif b_id in tips_by_branch[other_pred]:
+                        g_cols_dict[b_id].append(-k_mats[b_id])
+                    else:
+                        g_cols_dict[b_id].append(np.zeros((6, 13)))
+
+        # Convert dictionary to ordered list of column blocks
+        has_g_eqs = any(len(blocks) > 0 for blocks in g_cols_dict.values())
+        if has_g_eqs:
+            g_cols = [np.vstack(g_cols_dict[b_id], dtype=np.float64) for b_id in boundaries]
+        else:
+            g_cols = []
+
+        return g_cols
+
+    def _reduce_cut_points(
+            self,
+            boundaries: List[EntityID],
+            t_mats: List[Matrix],
+            g_cols: List[Matrix] | None = None
+    ) -> Tuple[List[EntityID], List[Matrix], List[Matrix]]:
+        reduced_boundaries = boundaries.copy()
+        reduced_t_mats = t_mats.copy()
+        reduced_g_cols = g_cols.copy() if g_cols is not None else []
+
+        for cut in self._cut_points:
+            # Find the index of the cut's virtual boundaries.
+            try:
+                idx1 = next(i for i, b_id in enumerate(reduced_boundaries) if b_id == cut.b_id1)
+                idx2 = next(i for i, b_id in enumerate(reduced_boundaries) if b_id == cut.b_id2)
+            except StopIteration:
+                err_msg = f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips."
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+
+            reduced_t_mats[idx1] += reduced_t_mats[idx2] @ cut.mat
+            reduced_t_mats.pop(idx2)
+
+            if reduced_g_cols:
+                reduced_g_cols[idx1] += reduced_g_cols[idx2] @ cut.mat
+                reduced_g_cols.pop(idx2)
+
+            reduced_boundaries.pop(idx2)
+
+        return reduced_boundaries, reduced_t_mats, reduced_g_cols
 
     def overall_transfer(self, omega) -> Tuple[Matrix, Vector, List[EntityID]]:
         """
@@ -402,51 +511,21 @@ class MBS:
         :param omega:
         :return:
         """
-
+        remaining_boundaries = self.boundaries  # Tracks what boundary vectors are actually still in z_red
+        # --- TRANSFER MATRIX COMPUTATION ---
         t_mats = [- np.identity(13)]  # init with root
         for t_id in self._tips:
             path = self.resolve_branch_up_to(src=t_id, tgt=self.root.b_id)
             t_mats.append(self.transfer_mat_along_path(path, omega))
 
-        multi_input_elems = [e_id for e_id in self._elements if self.graph.in_degree(e_id) > 1]
-        g_cols = []
+        # --- GEOMETRIC MATRIX COMPUTATION ---
+        g_cols = self._get_geometric_constraints(remaining_boundaries, omega)
 
-        if multi_input_elems:
-            g_cols.append(np.zeros((6*len(multi_input_elems), 13), dtype=np.float64))
-            for t_id in self._tips:
-                col = []
-                for mult_in_e_id in multi_input_elems:
-                    col.append(self._geometric_equation(t_id, mult_in_e_id, omega))
-                g_cols.append(np.vstack(col))
-
+        # --- OVERALL MATRIX ASSEMBLY ---
         # Condense columns using the cut-point relations
-        # TODO: Move to a separate function
-        remaining_boundaries = self.boundaries  # Tracks what boundary vectors are actually still in z_red
-        # TODO: Fix potential error regarding root/tip pair generated from a closed loop
-        for cut in self._cut_points:
-            # Find the index of the cut's virtual boundaries.
-            try:
-                idx1 = next(i for i, b_id in enumerate(remaining_boundaries) if b_id == cut.b_id1)
-                idx2 = next(i for i, b_id in enumerate(remaining_boundaries) if b_id == cut.b_id2)
-                # TODO: mathematically equivalent but need to check if the code can work with indices switched
-                if remaining_boundaries[idx2] == self.root.b_id:
-                    idx1, idx2 = idx2, idx1
-            except StopIteration:
-                err_msg = f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips."
-                logger.error(err_msg)
-                raise ValueError(err_msg)
-
-            t_mats[idx1] += t_mats[idx2] @ cut.mat
-            t_mats.pop(idx2)
-
-            if multi_input_elems:
-                g_cols[idx1] += g_cols[idx2] @ cut.mat
-                g_cols.pop(idx2)
-
-            remaining_boundaries.pop(idx2)
-
+        remaining_boundaries, t_mats, g_cols = self._reduce_cut_points(remaining_boundaries, t_mats, g_cols)
         # Assemble full-sized overall transfer matrix
-        if multi_input_elems:
+        if g_cols:
             u_all = np.block([
                 t_mats,
                 g_cols
@@ -516,13 +595,15 @@ class MBS:
 
     def natural_modes(
             self,
-            n_modes: int,
+            n_modes: int, omega_min=0,
             omega_max: int = 1000,
             search_res: int = 5000,
-            rtol: float = 1e-5  # Reciprocal condition number tolerance
+            rtol: float = 1e-5
     ) -> List[Tuple[float, Vector]]:
 
-        omega = np.linspace(0, omega_max, search_res)[1:]  # skip omega = 0
+        omega = np.linspace(omega_min, omega_max, search_res)
+        # Only retain strictly positive frequencies to avoid dividing by zero or negative frequencies
+        omega = omega[omega > 0]
         sigma = np.array([self._sigma_min(w) for w in omega])
         # Find rough peaks corresponding to the smallest singular values
         prominence = 5e-2 * np.max(sigma)
@@ -585,7 +666,7 @@ class MBS:
         tip_svs = boundary_svs
 
         # Initialize search heads, traversal tracking, and state vectors for each element
-        search_heads = deque([t for t in self.tips])
+        search_heads = deque([t for t in self._tips])
         searched = {k: False for k in self._elements}
         state_vecs = defaultdict(
             lambda: np.zeros(13),
@@ -601,7 +682,7 @@ class MBS:
                 continue
             # Info about the next element
             next_elem = self._elements[next_id]
-            input_slot = self.graph[head_id][next_id]['input_slot']
+            input_slot = self.tree[head_id][next_id]['input_slot']
             output_slot = self._successor_in_tree[next_id]['output_slot']
             output_pos = next_elem.slots_pos[output_slot]
             # Add to the output state vector of the next element
@@ -625,7 +706,7 @@ class MBS:
             logger.debug(msg)
 
         # Verify that the propagated state vector satisfies the boundary conditions at the root
-        last_elem_id = next(self.graph.predecessors(self.root.b_id))
+        last_elem_id = next(self.tree.predecessors(self.root.b_id))
 
         rerr = np.linalg.norm(state_vecs[last_elem_id] - root_sv)/np.linalg.norm(root_sv)
         if rerr < rtol:
