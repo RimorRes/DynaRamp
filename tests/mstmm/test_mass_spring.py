@@ -58,8 +58,8 @@ def create_mass_spring_oscillator():
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
-    system.add_root(root_boundary, mass_elem2, 'output')
-    system.add_tip(tip_boundary, spring_elem, None)
+    system.add_root(mass_elem2, 'output', root_boundary)
+    system.add_tip(spring_elem, None, tip_boundary)
 
     system.make_tree()
 
@@ -110,12 +110,81 @@ def create_parallel_mass_spring_oscillator(n):
             dst = 'aux' + str(i)
         system.connect_elements(spring, mass_elem, src_slot='output', dst_slot=dst)
         tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
-        system.add_tip(tip_boundary, spring, None)
+        system.add_tip(spring, None, tip_boundary)
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
-    system.add_root(root_boundary, mass_elem, 'output')
+    system.add_root(mass_elem, 'output', root_boundary)
 
+    system.make_tree()
+
+    return system
+
+
+def create_simple_closed_loop_system(auto_cut: bool = False):
+    system = dyn.MBS()
+
+    # Masses
+    m = 2
+    width = 1  # X
+    depth = 1  # Y
+    height = 2  # Z
+    i_xx = 1 / 12 * m * (depth ** 2 + height ** 2)
+    i_yy = 1 / 12 * m * (width ** 2 + height ** 2)
+    i_zz = 1 / 12 * m * (width ** 2 + depth ** 2)
+    inertia = np.diag([i_xx, i_yy, i_zz])
+    # Springs
+    k = 20
+    k_penalty = 1e6
+    length = 1
+
+    mass_1 = dyn.RigidBody(
+        e_id='mass_1',
+        mass=m,
+        inertia=inertia,
+        com=(-width / 2, 0, height / 2),
+        slot_coords={
+            'out_1,2': (0, 0, height)
+        }
+    )
+
+    spring_2 = dyn.SpatialElasticHinge(
+        e_id='spring_2',
+        k=(k, k_penalty, k_penalty),
+        k_rot=(k_penalty, k_penalty, k_penalty),
+        slot_coords={
+            'out_2,3': (length, 0, 0)
+        }
+    )
+
+    mass_3 = dyn.RigidBody(
+        e_id='mass_3',
+        mass=m,
+        inertia=inertia,
+        com=(width / 2, 0, -height / 2),
+        slot_coords={
+            'out_3,4': (0, 0, -height)
+        }
+    )
+
+    spring_4 = dyn.SpatialElasticHinge(
+        e_id='spring_4',
+        k=(k, k_penalty, k_penalty),
+        k_rot=(k_penalty, k_penalty, k_penalty),
+        slot_coords={
+            'out_4,1': (-length, 0, 0)
+        }
+    )
+
+    system.add_elements((mass_1, spring_2, mass_3, spring_4))
+    system.connect_elements(mass_1, spring_2, src_slot='out_1,2', dst_slot=None)
+    system.connect_elements(spring_2, mass_3, src_slot='out_2,3', dst_slot=None)
+    system.connect_elements(mass_3, spring_4, src_slot='out_3,4', dst_slot=None)
+    system.connect_elements(spring_4, mass_1, src_slot='out_4,1', dst_slot=None)
+    if not auto_cut:
+        system.cut_connection((spring_4, mass_1))
+
+    # No explicit tip boundaries
     system.make_tree()
 
     return system
@@ -123,7 +192,7 @@ def create_parallel_mass_spring_oscillator(n):
 
 def test_mass_spring_oscillator():
     oscillator = create_mass_spring_oscillator()
-    u, f, _ = oscillator.overall_transfer(5)
+    u, f, _, __ = oscillator.overall_transfer(5)
     assert np.allclose(f, 0)
 
     modes = oscillator.natural_modes(2, omega_max=50)
@@ -147,9 +216,35 @@ def test_parallel_mass_spring_oscillator():
     omega_max = omega + 1
 
     oscillator = create_parallel_mass_spring_oscillator(n)
-    u, f, _ = oscillator.overall_transfer(5)
+    u, f, _, __ = oscillator.overall_transfer(5)
     assert np.allclose(f, 0)
 
-    mode = oscillator.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
+    w, _ = oscillator.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
 
-    assert np.allclose(mode[0], omega, rtol=1e-3)
+    assert np.isclose(w, omega, rtol=1e-3)
+
+
+def test_simple_closed_loop_system():
+    k = 20
+    m = 2
+    # Theoretical natural frequency for a mass-spring system with one mass and two identical springs in parallel
+    omega = np.sqrt(4*k/m)
+
+    system = create_simple_closed_loop_system()
+
+    w, _ = system.natural_modes(1, omega_min=6, omega_max=7)[0]
+
+    assert np.isclose(w, omega, rtol=1e-3)
+
+
+def test_closed_loop_auto_cut():
+    k = 20
+    m = 2
+    # Theoretical natural frequency for a mass-spring system with one mass and two identical springs in parallel
+    omega = np.sqrt(4 * k / m)
+
+    system = create_simple_closed_loop_system(auto_cut=True)
+
+    w, _ = system.natural_modes(1, omega_min=6, omega_max=7)[0]
+
+    assert np.isclose(w, omega, rtol=1e-3)

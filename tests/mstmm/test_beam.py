@@ -29,8 +29,8 @@ def create_cantilever_beam():
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
-    system.add_root(root_boundary, beam_elem, 'end')
-    system.add_tip(tip_boundary, beam_elem, None)
+    system.add_root(beam_elem, 'end', root_boundary)
+    system.add_tip(beam_elem, None, tip_boundary)
 
     system.make_tree()
 
@@ -42,11 +42,11 @@ def test_cantilever_beam():
     modes = cant_beam.natural_modes(7)
 
     for w, shape in modes:
-        u, f, rem_bounds = cant_beam.overall_transfer(w)
+        u, f, z_rem, rem_bounds = cant_beam.overall_transfer(w)
         assert np.allclose(f, 0)
 
         z_red = null_space(u, rcond=1e-8).reshape(12)
 
-        bound_svs = cant_beam.reconstruct_boundary_states(z_red, rem_bounds)
+        bound_svs = cant_beam.reconstruct_boundary_states(z_red, z_rem, rem_bounds)
 
         assert np.allclose(np.abs(bound_svs[cant_beam.root.b_id]), np.abs(shape[cant_beam.root.b_id]))

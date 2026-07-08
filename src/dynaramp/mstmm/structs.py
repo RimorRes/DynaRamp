@@ -14,6 +14,9 @@ from ..common_types import EntityID, Vector, VectorLike, Matrix
 logger = logging.getLogger(__name__)
 
 
+NULL_SV = np.r_[np.full(12, None), 1]
+NULL_SV.setflags(write=False)
+
 type ElemLike = EntityID | Element
 
 
@@ -111,7 +114,8 @@ class Element(ABC):
 @dataclass
 class Boundary:
     b_id: EntityID
-    state_vector: VectorLike  # Numerical value for known boundary value, None for unknown
+    # Numerical value for known boundary value, None for unknown
+    state_vector: VectorLike
 
 
 @dataclass
