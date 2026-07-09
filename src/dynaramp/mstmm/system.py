@@ -315,7 +315,7 @@ class MBS:
         # clean up the old edge and save the cutting point relation
         self._cut_points.append(cut)
         self._internal_graph.remove_edge(src_id, dst_id)
-        logger.debug(f"{log_prefix}: old edge removed.")
+        logger.debug(f"{log_prefix} old edge removed.")
         logger.info(f"{log_prefix} done.")
 
         return self
@@ -404,13 +404,8 @@ class MBS:
 
         # Next, we buffer what elements have what upstream tips. We don't want to keep testing unreachable elements.
         for e in self._elements:
-            self._upstream_tips[e] = []
-            for t_id in self._tips:
-                try:
-                    self.resolve_branch_up_to(src=t_id, tgt=e)
-                    self._upstream_tips[e].append(t_id)
-                except ValueError:
-                    continue
+            ancestors = nx.ancestors(self._internal_graph, e)
+            self._upstream_tips[e] = [n for n in ancestors if n in self._tips]
 
         logger.info("Successfully built valid tree system.")
         self._tree_generated = True
@@ -632,6 +627,9 @@ class MBS:
 
         return bound_svs
 
+    def solve(self):
+        raise NotImplementedError
+
     def _sigma_min(self, omega: float) -> float:
         """
         Helper for retrieving the smallest singular value of an SVD of U_all(w).
@@ -640,9 +638,6 @@ class MBS:
         """
         u = self.overall_transfer(omega)[0]
         return np.linalg.svd(u, compute_uv=False)[-1]
-
-    def solve(self):
-        pass
 
     def natural_modes(
             self,
@@ -764,9 +759,9 @@ class MBS:
 
         rerr = np.linalg.norm(state_vecs[last_elem_id] - root_sv)/np.linalg.norm(root_sv)
         if rerr < rtol:
-            logger.debug(f"{log_prefix} propagated state matches root boundary state. Relative error = {rerr}")
+            logger.debug(f"{log_prefix} propagated state matches root boundary state. Relative error = {rerr:.3e}")
         else:
-            err_msg = f"{log_prefix} propagated state doesn't match root boundary state. Relative error = {rerr}"
+            err_msg = f"{log_prefix} propagated state doesn't match root boundary state. Relative error = {rerr:.3e}"
             logger.error(err_msg)
             raise ValueError(err_msg)
 
