@@ -120,6 +120,7 @@ def create_parallel_mass_spring_oscillator(n):
 
     return system
 
+
 def create_simple_multi_output_system():
     system = dyn.MBS()
 

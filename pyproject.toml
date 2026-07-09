@@ -22,4 +22,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "DEBUG"
-log_cli_format = "%(levelname)s [%(name)s] %(filename)s:%(lineno)d %(funcName)s - %(message)s"
+log_cli_format = "%(levelname)-8s | [%(name)24s:%(lineno)-4d] %(funcName)s - %(message)s"

@@ -293,7 +293,8 @@ class MBS:
                     # Cutting a connection in this case generates a new virtual INPUT/OUTPUT pair.
                     # No C sign matrix will be needed. Both state vectors are equal
                     cut = CutPoint(b_id1, b_id2, False)
-                    logger.info(f"{log_prefix} cut closed loop. Created new root [{b_id1}] and tip [{b_id2}].")
+                    logger.info(f"{log_prefix} cut closed loop")
+                    logger.debug(f"Created new root [{b_id1}] and tip [{b_id2}].")
                 except ValueError as exc:
                     err_msg = f"{log_prefix} failed to cut the connection. Could not create new root."
                     logger.error(err_msg)
@@ -310,13 +311,13 @@ class MBS:
             # Cutting a connection in this case generates two new virtual INPUT tips/boundaries.
             # C sign matrix will be needed
             cut = CutPoint(b_id1, b_id2)
-            logger.debug(f"{log_prefix} cut connection. Created new tips [{b_id1}] and [{b_id2}].")
+            logger.info(f"{log_prefix} cut connection.")
+            logger.debug(f"Created new tips [{b_id1}] and [{b_id2}].")
 
         # clean up the old edge and save the cutting point relation
         self._cut_points.append(cut)
         self._internal_graph.remove_edge(src_id, dst_id)
         logger.debug(f"{log_prefix} old edge removed.")
-        logger.info(f"{log_prefix} done.")
 
         return self
 
@@ -673,8 +674,8 @@ class MBS:
             # Reciprocal condition number
             rcond = s[-1] / s[0]
 
-            logger.debug(f"Mode candidate at {res.x:.3e} rad/s: "
-                         f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
+            logger.info(f"Mode candidate at {res.x:.3e} rad/s.")
+            logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
             # If rcond passes the tolerance, save the frequency and mode shape
             if rcond < rtol:
                 all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_rem=z_rem,
@@ -708,7 +709,8 @@ class MBS:
         :param rtol:
         :return:
         """
-        log_prefix = f"Computing internal states at {omega:.3e} rad/s:"
+
+        logger.debug(f"Computing internal states at {omega:.3e} rad/s")
 
         boundary_svs = self.reconstruct_boundary_states(z_red, z_rem, rem_boundary_ids)
         root_sv = boundary_svs.pop(self.root.b_id)
@@ -747,7 +749,7 @@ class MBS:
 
         # Verify that all elements have been sweeped
         searched_count = list(searched.values()).count(True)
-        msg = f"{log_prefix} swept through ({searched_count}/{len(searched)}) elements."
+        msg = f"Swept through ({searched_count}/{len(searched)}) elements."
         if searched_count != len(searched):
             logger.error(msg)
             raise RuntimeError(msg)
@@ -759,15 +761,15 @@ class MBS:
 
         rerr = np.linalg.norm(state_vecs[last_elem_id] - root_sv)/np.linalg.norm(root_sv)
         if rerr < rtol:
-            logger.debug(f"{log_prefix} propagated state matches root boundary state. Relative error = {rerr:.3e}")
+            logger.debug(f"Propagated state matches root boundary state. Relative error = {rerr:.3e}")
         else:
-            err_msg = f"{log_prefix} propagated state doesn't match root boundary state. Relative error = {rerr:.3e}"
+            err_msg = f"Propagated state doesn't match root boundary state. Relative error = {rerr:.3e}"
             logger.error(err_msg)
             raise ValueError(err_msg)
 
         # Add the root to the end of the dict
         state_vecs[self.root.b_id] = root_sv
 
-        logger.info(f"{log_prefix} success.")
+        logger.info(f"Successfully computed internal states at {omega:.3e} rad/s.")
 
         return state_vecs
