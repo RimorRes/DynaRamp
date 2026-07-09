@@ -7,19 +7,23 @@ from typing import Dict
 
 import numpy as np
 
-from ..vecmath import skew_sym_mat
-from ..common_types import EntityID, Vector, VectorLike, Matrix
+from common.vecmath import skew_sym_mat
+from common.types import EntityID, Vector, VectorLike, Matrix
 
 
 logger = logging.getLogger(__name__)
 
-
+# Constants
 NULL_SV = np.r_[np.full(12, None), 1]
 NULL_SV.setflags(write=False)
 
 type ElemLike = EntityID | Element
 
 
+# TODO: make Element a regular class (not a dataclass)
+# TODO: QoL: better slot definition (main slot and relative coords) and add copy method
+# TODO: Constructor using geometry primitives
+# TODO: Add support for rotations
 @dataclass
 class Element(ABC):
     e_id: EntityID

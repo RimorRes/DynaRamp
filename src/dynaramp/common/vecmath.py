@@ -3,7 +3,7 @@ import logging
 
 import numpy as np
 
-from .common_types import VectorLike, Matrix
+from .types import VectorLike, Matrix
 
 
 logger = logging.getLogger(__name__)

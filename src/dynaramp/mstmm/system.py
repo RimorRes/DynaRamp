@@ -9,12 +9,13 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.optimize import minimize_scalar
 
-from ..common_types import EntityID, is_entity_id, Vector, VectorLike, Matrix
+from common.types import EntityID, is_entity_id, Vector, VectorLike, Matrix
 from .structs import NULL_SV, Element, ElemLike, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
 
 # TODO: better error raising, custom exceptions?
+# TODO: Clean up z_rem, z_red, rem_boundaries clutter (Results class? or aggregate params/returns?)
 
 
 class MBS:
@@ -628,68 +629,6 @@ class MBS:
 
         return bound_svs
 
-    def solve(self):
-        raise NotImplementedError
-
-    def _sigma_min(self, omega: float) -> float:
-        """
-        Helper for retrieving the smallest singular value of an SVD of U_all(w).
-        :param omega:
-        :return:
-        """
-        u = self.overall_transfer(omega)[0]
-        return np.linalg.svd(u, compute_uv=False)[-1]
-
-    def natural_modes(
-            self,
-            n_modes: int, omega_min=0,
-            omega_max: int = 1000,
-            search_res: int = 10000,
-            rtol: float = 1e-5
-    ) -> List[Tuple[float, Vector]]:
-
-        omega = np.linspace(omega_min, omega_max, search_res)
-        # Only retain strictly positive frequencies
-        # We want to ignore rigid modes (and avoid dividing by zero) and negative frequencies
-        omega = omega[omega > 0]
-        sigma = np.array([self._sigma_min(w) for w in omega])
-        # Find rough peaks corresponding to the smallest singular values
-        prominence = 5e-2 * np.max(sigma)
-        candidates, _ = find_peaks(-sigma, prominence=prominence)
-
-        modes = []
-        # Refine candidates
-        for idx in candidates:
-            if idx == 0 or idx == len(omega) - 1:
-                continue
-            # Minimize the singular values that approach zero
-            res = minimize_scalar(
-                self._sigma_min,
-                bounds=(omega[idx - 1], omega[idx + 1]),
-                method="bounded"
-            )
-            # Apply SVD to the transfer matrix at the refined frequency
-            u, _, z_rem, rem_bounds = self.overall_transfer(res.x)
-            _, s, vh = np.linalg.svd(u)
-            # Reciprocal condition number
-            rcond = s[-1] / s[0]
-
-            logger.info(f"Mode candidate at {res.x:.3e} rad/s.")
-            logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
-            # If rcond passes the tolerance, save the frequency and mode shape
-            if rcond < rtol:
-                all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_rem=z_rem,
-                                                      rem_boundary_ids=rem_bounds)  # or Vh[-1].T for the mode shape
-                modes.append((res.x, all_state_vecs))
-
-        modes.sort(key=lambda x: x[0])
-
-        logger.info(f"Found {len(modes)} natural modes between {omega_min:.3e} rad/s and {omega_max:.3e} rad/s.")
-        for w, _ in modes:
-            logger.debug(f"Mode at {w:.3e} rad/s.")
-
-        return modes[:n_modes]
-
     def propagate_state(
             self,
             omega: float,
@@ -773,3 +712,65 @@ class MBS:
         logger.info(f"Successfully computed internal states at {omega:.3e} rad/s.")
 
         return state_vecs
+
+    def _sigma_min(self, omega: float) -> float:
+        """
+        Helper for retrieving the smallest singular value of an SVD of U_all(w).
+        :param omega:
+        :return:
+        """
+        u = self.overall_transfer(omega)[0]
+        return np.linalg.svd(u, compute_uv=False)[-1]
+
+    def natural_modes(
+            self,
+            n_modes: int, omega_min=0,
+            omega_max: int = 1000,
+            search_res: int = 10000,
+            rtol: float = 1e-5
+    ) -> List[Tuple[float, Vector]]:
+
+        omega = np.linspace(omega_min, omega_max, search_res)
+        # Only retain strictly positive frequencies
+        # We want to ignore rigid modes (and avoid dividing by zero) and negative frequencies
+        omega = omega[omega > 0]
+        sigma = np.array([self._sigma_min(w) for w in omega])
+        # Find rough peaks corresponding to the smallest singular values
+        prominence = 5e-2 * np.max(sigma)
+        candidates, _ = find_peaks(-sigma, prominence=prominence)
+
+        modes = []
+        # Refine candidates
+        for idx in candidates:
+            if idx == 0 or idx == len(omega) - 1:
+                continue
+            # Minimize the singular values that approach zero
+            res = minimize_scalar(
+                self._sigma_min,
+                bounds=(omega[idx - 1], omega[idx + 1]),
+                method="bounded"
+            )
+            # Apply SVD to the transfer matrix at the refined frequency
+            u, _, z_rem, rem_bounds = self.overall_transfer(res.x)
+            _, s, vh = np.linalg.svd(u)
+            # Reciprocal condition number
+            rcond = s[-1] / s[0]
+
+            logger.info(f"Mode candidate at {res.x:.3e} rad/s.")
+            logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
+            # If rcond passes the tolerance, save the frequency and mode shape
+            if rcond < rtol:
+                all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_rem=z_rem,
+                                                      rem_boundary_ids=rem_bounds)  # or Vh[-1].T for the mode shape
+                modes.append((res.x, all_state_vecs))
+
+        modes.sort(key=lambda x: x[0])
+
+        logger.info(f"Found {len(modes)} natural modes between {omega_min:.3e} rad/s and {omega_max:.3e} rad/s.")
+        for w, _ in modes:
+            logger.debug(f"Mode at {w:.3e} rad/s.")
+
+        return modes[:n_modes]
+
+    def solve(self):
+        raise NotImplementedError
