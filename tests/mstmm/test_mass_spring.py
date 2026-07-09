@@ -120,6 +120,69 @@ def create_parallel_mass_spring_oscillator(n):
 
     return system
 
+def create_simple_multi_output_system():
+    system = dyn.MBS()
+
+    m = 5
+    s = 1
+    unit_inertia = 1 / 6 * s ** 2 * np.eye(3)
+    mass_1 = dyn.RigidBody(
+        e_id='mass_1',
+        mass=m,
+        inertia=m * unit_inertia,
+        com=(0, 0, s / 2),
+        slot_coords={
+            'out_1,2': (-s / 2, 0, s),
+            'out_1,3': (s / 2, 0, s)
+        }
+    )
+    mass_4 = dyn.RigidBody(
+        e_id='mass_4',
+        mass=m,
+        inertia=m * unit_inertia,
+        com=(s / 2, 0, s / 2),
+        slot_coords={
+            'aux_in': (s, 0, s),
+            'output': (s / 2, 0, s)
+        }
+    )
+
+    length = 1
+    k = 10
+    k_penalty = 1e5
+    spring_2 = dyn.SpatialElasticHinge(
+        e_id='spring_2',
+        k=(k_penalty, k_penalty, k),
+        k_rot=(k_penalty, k_penalty, k_penalty),
+        slot_coords={
+            'output': (0, 0, length)
+        }
+    )
+    spring_3 = dyn.SpatialElasticHinge(
+        e_id='spring_3',
+        k=(k_penalty, k_penalty, k),
+        k_rot=(k_penalty, k_penalty, k_penalty),
+        slot_coords={
+            'output': (0, 0, length)
+        }
+    )
+
+    system.add_elements([mass_1, spring_2, spring_3, mass_4])
+    system.connect_elements(mass_1, spring_2, src_slot='out_1,2', dst_slot=None)
+    system.connect_elements(mass_1, spring_3, src_slot='out_1,3', dst_slot=None)
+    system.connect_elements(spring_2, mass_4, src_slot='output', dst_slot=None)
+    system.connect_elements(spring_3, mass_4, src_slot='output', dst_slot='aux_in')
+    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
+    tip_sv = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
+    root_sv = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
+
+    system.add_root(mass_4, 'output', root_sv)
+    system.add_tip(mass_1, None, tip_sv)
+
+    system.make_tree()
+
+    return system
+
 
 def create_simple_closed_loop_system(auto_cut: bool = False):
     system = dyn.MBS()
@@ -191,18 +254,20 @@ def create_simple_closed_loop_system(auto_cut: bool = False):
 
 
 def test_mass_spring_oscillator():
-    oscillator = create_mass_spring_oscillator()
-    u, f, _, __ = oscillator.overall_transfer(5)
-    assert np.allclose(f, 0)
-
-    modes = oscillator.natural_modes(2, omega_max=50)
-    ws, shapes = zip(*modes)
     # Theoretical natural frequencies for a mass-spring system with two masses and two identical springs in series
     k = 20
     m1 = 5
     m2 = 5
-    omega1 = np.sqrt(k/(2*m1) * (2 + (m1/m2) - np.sqrt(4 + (m1/m2)**2)))
-    omega2 = np.sqrt(k/(2*m1) * (2 + (m1/m2) + np.sqrt(4 + (m1/m2)**2)))
+    omega1 = np.sqrt(k / (2 * m1) * (2 + (m1 / m2) - np.sqrt(4 + (m1 / m2) ** 2)))
+    omega2 = np.sqrt(k / (2 * m1) * (2 + (m1 / m2) + np.sqrt(4 + (m1 / m2) ** 2)))
+
+    oscillator = create_mass_spring_oscillator()
+    u, f, _, __ = oscillator.overall_transfer(omega1)
+    assert np.allclose(f, 0)
+
+    modes = oscillator.natural_modes(2, omega_max=50)
+    ws, shapes = zip(*modes)
+
     assert np.allclose(ws, [omega1, omega2], rtol=1e-3)
 
 
@@ -216,10 +281,24 @@ def test_parallel_mass_spring_oscillator():
     omega_max = omega + 1
 
     oscillator = create_parallel_mass_spring_oscillator(n)
-    u, f, _, __ = oscillator.overall_transfer(5)
+    u, f, _, __ = oscillator.overall_transfer(omega)
     assert np.allclose(f, 0)
 
     w, _ = oscillator.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
+
+    assert np.isclose(w, omega, rtol=1e-3)
+
+
+def test_multi_output_element():
+    k = 10
+    m = 5
+    # Theoretical natural frequency for a mass-spring system with one mass and two identical springs in parallel
+    omega = np.sqrt(2 * k / m)
+    omega_min = omega - 1
+    omega_max = omega + 1
+
+    system = create_simple_multi_output_system()
+    w, _ = system.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
 
     assert np.isclose(w, omega, rtol=1e-3)
 
@@ -231,7 +310,6 @@ def test_simple_closed_loop_system():
     omega = np.sqrt(4*k/m)
 
     system = create_simple_closed_loop_system()
-
     w, _ = system.natural_modes(1, omega_min=6, omega_max=7)[0]
 
     assert np.isclose(w, omega, rtol=1e-3)
@@ -244,7 +322,6 @@ def test_closed_loop_auto_cut():
     omega = np.sqrt(4 * k / m)
 
     system = create_simple_closed_loop_system(auto_cut=True)
-
     w, _ = system.natural_modes(1, omega_min=6, omega_max=7)[0]
 
     assert np.isclose(w, omega, rtol=1e-3)

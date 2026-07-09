@@ -28,12 +28,15 @@ class MBS:
         self._cut_points: List[CutPoint] = []
 
         self._z_all = np.array([], dtype=np.float64)  # Overall state vector (concatenated boundary vectors)
-        self._z_all_cache_invalid = True  # Flag to indicate if the overall state vector needs to be recomputed
 
         self._internal_graph: nx.DiGraph = nx.DiGraph()
         self._user_graph: nx.DiGraph = nx.DiGraph()  # Graph entirely defined by user, for visualization and analysis
+
+        # For internal use only!
+        self._z_all_cache_invalid = True  # Flag to indicate if the overall state vector needs to be recomputed
         self._tree_generated = False
         self._successor_in_tree = {}
+        self._upstream_tips = {}
 
     # Read-only attributes
     @property
@@ -399,6 +402,16 @@ class MBS:
             successor = next(self._internal_graph.successors(t_id))
             self._successor_in_tree[t_id] = {'output_slot': None, 'next': successor}
 
+        # Next, we buffer what elements have what upstream tips. We don't want to keep testing unreachable elements.
+        for e in self._elements:
+            self._upstream_tips[e] = []
+            for t_id in self._tips:
+                try:
+                    self.resolve_branch_up_to(src=t_id, tgt=e)
+                    self._upstream_tips[e].append(t_id)
+                except ValueError:
+                    continue
+
         logger.info("Successfully built valid tree system.")
         self._tree_generated = True
 
@@ -469,23 +482,20 @@ class MBS:
             tips_by_branch = {p: [] for p in preds}
             k_mats = {}
 
-            for t_id in self._tips:
-                try:
-                    path = self.resolve_branch_up_to(src=t_id, tgt=m_id)
-                    branch_node = path[-1]
-                    if branch_node in tips_by_branch:
-                        tips_by_branch[branch_node].append(t_id)
+            for t_id in self._upstream_tips[m_id]:
+                path = self.resolve_branch_up_to(src=t_id, tgt=m_id)
+                branch_node = path[-1]
+                if branch_node in tips_by_branch:
+                    tips_by_branch[branch_node].append(t_id)
 
-                    # Extract the pure kinematics transformation matrix (no negative signs!)
-                    u_chain = self.transfer_mat_along_path(path, omega)
-                    input_slot = self.tree[branch_node][m_id]['input_slot']
-                    if input_slot is None:
-                        k_mat = self._elements[m_id].h_ext @ u_chain
-                    else:
-                        k_mat = self._elements[m_id].h_incs[input_slot] @ u_chain
-                    k_mats[t_id] = k_mat
-                except ValueError:
-                    continue
+                # Extract the pure kinematics transformation matrix (no negative signs!)
+                u_chain = self.transfer_mat_along_path(path, omega)
+                input_slot = self.tree[branch_node][m_id]['input_slot']
+                if input_slot is None:
+                    k_mat = self._elements[m_id].h_ext @ u_chain
+                else:
+                    k_mat = self._elements[m_id].h_incs[input_slot] @ u_chain
+                k_mats[t_id] = k_mat
 
             # Generate exactly (N - 1) sets of geometric constraints
             ref_pred = preds[0]
