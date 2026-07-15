@@ -372,13 +372,12 @@ def test_closed_loop_auto_cut():
 
 def test_static_loading():
     k = 20
-    m = 2
+    m = 5
 
     system = create_static_loading()
     u, f, z_rem, rem_bounds = system.overall_transfer(0)
-    print(f)
     z_red = solve(u, f)
 
     state_vecs = system.propagate_state(0, z_red, z_rem, rem_bounds)
-    for sv in state_vecs:
-        print(sv, state_vecs[sv])
+    tip = next(iter(system.tips))
+    assert np.isclose(state_vecs[tip][2], -9.81*m/k, rtol=1e-3)

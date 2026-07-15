@@ -588,7 +588,7 @@ class MBS:
         # ... and move columns corresponding to known non-zero boundary conditions into a load vector
         u_nz = u_all[:, nonzero_mask]
         z_nz = z_rem[nonzero_mask].astype(np.float64)
-        f = u_nz @ z_nz
+        f = - u_nz @ z_nz
         # Remove the trivial 13th row
         triv_mask = np.ones_like(f, dtype=bool)
         triv_mask[12] = False
