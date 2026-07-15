@@ -58,7 +58,7 @@ class Element(ABC):
         :return: Transfer matrix (13x13)
         """
         # Transport external load vector from I1 to O
-        r = - np.array(output_pos)
+        r = np.array(output_pos)
         transform = np.block([
             [np.zeros((6, 12))],
             [np.zeros((3, 6)), np.identity(3), skew_sym_mat(r)],
