@@ -19,35 +19,32 @@ NULL_SV.setflags(write=False)
 
 type ElemLike = EntityID | Element
 
-
 # TODO: make Element a regular class (not a dataclass)
 # TODO: QoL: better slot definition (main slot and relative coords) and add copy method
 # TODO: Constructor using geometry primitives
 # TODO: Add support for rotations
-@dataclass
+
+
 class Element(ABC):
-    e_id: EntityID
-    # positions of slots relative to the main input
-    slots_pos: Dict[EntityID, Vector]
 
-    _f_load_at_in: Vector = field(default_factory=lambda: np.zeros((12, 1)))  # Load vector transported to main input
+    def __init__(self, e_id: EntityID, slots_pos: Dict[EntityID, Vector]):
+        self.e_id = e_id
+        self.slots_pos = slots_pos
 
-    h_ext: Matrix = field(init=False)
-    h_incs: Dict[EntityID, Matrix] = field(init=False)
+        self._f_load_at_in = np.zeros((12, 1))  # Load vector transported to main input
 
-    def __post_init__(self):
-        self.h_incs = {}
-        # Auto-generate the geometric extraction and incidence matrices (extended 13x1 state vectors)
+        # H extraction
+        self.h_ext = np.block([
+            np.identity(6), np.zeros((6, 7))
+        ])
+        self.h_incs: Dict[EntityID, Matrix] = {}
+        # Auto-generate the geometric incidence matrices (extended 13x1 state vectors)
         for s in self.slots_pos:
             r = self.slots_pos[s]  # position of slot relative to the main input
             transform = np.block([  # Transform force and moments from slot Ik to slot I1
                 [np.identity(3), skew_sym_mat(r)],
                 [np.zeros((3, 3)), np.identity(3)]
             ])
-            # H extraction
-            self.h_ext = np.block([
-                np.identity(6), np.zeros((6, 7))
-             ])
             # H incidence
             self.h_incs[s] = np.block([
                 transform, np.zeros((6, 7))

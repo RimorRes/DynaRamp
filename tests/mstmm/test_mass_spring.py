@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import solve
 import dynaramp.mstmm as dyn
 
 
@@ -254,6 +255,48 @@ def create_simple_closed_loop_system(auto_cut: bool = False):
     return system
 
 
+def create_static_loading():
+    system = dyn.MBS()
+
+    m = 5
+    s = 1
+    unit_inertia = 1 / 6 * s ** 2 * np.eye(3)
+    mass_1 = dyn.RigidBody(
+        e_id='mass_1',
+        mass=m,
+        inertia=m * unit_inertia,
+        com=(0, 0, s / 2),
+        slot_coords={
+            'output': (0, 0, s)
+        }
+    )
+
+    length = 1
+    k = 20
+    k_penalty = 1e5
+    spring_2 = dyn.SpatialElasticHinge(
+        e_id='spring_2',
+        k=(k_penalty, k_penalty, k),
+        k_rot=(k_penalty, k_penalty, k_penalty),
+        slot_coords={
+            'output': (0, 0, length)
+        }
+    )
+
+    mass_1.apply_force(force=(0, 0, -9.81*m), point=(0, 0, s / 2))
+
+    system.add_elements([mass_1, spring_2])
+    system.connect_elements(mass_1, spring_2, src_slot='output', dst_slot=None)
+
+    system.add_root(spring_2, 'output', np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1]))
+    system.add_tip(mass_1, None, np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1]))
+
+    system.make_tree()
+
+    return system
+
+
+
 def test_mass_spring_oscillator():
     # Theoretical natural frequencies for a mass-spring system with two masses and two identical springs in series
     k = 20
@@ -326,3 +369,16 @@ def test_closed_loop_auto_cut():
     w, _ = system.natural_modes(1, omega_min=6, omega_max=7)[0]
 
     assert np.isclose(w, omega, rtol=1e-3)
+
+def test_static_loading():
+    k = 20
+    m = 2
+
+    system = create_static_loading()
+    u, f, z_rem, rem_bounds = system.overall_transfer(0)
+    print(f)
+    z_red = solve(u, f)
+
+    state_vecs = system.propagate_state(0, z_red, z_rem, rem_bounds)
+    for sv in state_vecs:
+        print(sv, state_vecs[sv])
