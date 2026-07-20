@@ -77,7 +77,7 @@ class Element(ABC):
         pass
 
     def u_ext(self, output_pos: VectorLike, slot_id: EntityID) -> Matrix:
-        r = self.slots_pos[slot_id] - np.array(output_pos)
+        r = np.array(output_pos) - self.slots_pos[slot_id]
         transform = np.block([  # Transform force and moments from slot Ik to slot O
             [np.identity(3), skew_sym_mat(r)],
             [np.zeros((3, 3)), np.identity(3)]
