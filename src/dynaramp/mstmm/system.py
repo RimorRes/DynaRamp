@@ -22,6 +22,7 @@ class MBS:
 
     def __init__(self):
         self._elements: Dict[EntityID, Element] = {}
+        # TODO: Refactor slots here
         self._slot_occupancy: Dict[EntityID, Dict[EntityID | None, str | None]] = {}  # 'input', 'output' or None
 
         self._root: Boundary | None = None
@@ -194,8 +195,8 @@ class MBS:
             self,
             src: ElemLike,
             dst: ElemLike,
-            src_slot: EntityID,
-            dst_slot: EntityID | None = None
+            src_pos: VectorLike,
+            dst_pos: VectorLike
     ) -> MBS:
 
         src_id = self._resolve_elem_id(src)

@@ -296,7 +296,6 @@ def create_static_loading():
     return system
 
 
-
 def test_mass_spring_oscillator():
     # Theoretical natural frequencies for a mass-spring system with two masses and two identical springs in series
     k = 20
@@ -369,6 +368,7 @@ def test_closed_loop_auto_cut():
     w, _ = system.natural_modes(1, omega_min=6, omega_max=7)[0]
 
     assert np.isclose(w, omega, rtol=1e-3)
+
 
 def test_static_loading():
     k = 20

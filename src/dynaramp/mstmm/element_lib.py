@@ -7,7 +7,7 @@ import numpy as np
 
 from .structs import Element
 from common.vecmath import skew_sym_mat
-from common.types import EntityID, VectorLike, Matrix
+from common.types import EntityID, Vector, VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +20,8 @@ class RigidBody(Element):
             mass: float,
             inertia: Matrix,
             com: VectorLike,
-            slot_coords: Dict[EntityID, VectorLike]
     ):
-        slots_pos = {s_id: np.array(pos) for s_id, pos in slot_coords.items()}
-        super().__init__(e_id, slots_pos)
+        super().__init__(e_id)
 
         self.mass = mass
         self.inertia = inertia
@@ -31,10 +29,16 @@ class RigidBody(Element):
         r = - self.com_pos
         self.j = inertia + mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
 
-    def _u(self, output_pos: VectorLike, omega: float) -> Matrix:
-        l_io = skew_sym_mat(output_pos)
-        l_ic = skew_sym_mat(self.com_pos)
-        l_co = l_io - l_ic
+    def _u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
+        # The vector FROM the input TO the output
+        r_io = output_pos - input_pos
+
+        # The vector FROM the input TO the center of mass
+        r_ic = self.com_pos - input_pos
+
+        l_io = skew_sym_mat(r_io)
+        l_ic = skew_sym_mat(r_ic)
+        l_co = l_io - l_ic  # Mathematically equivalent to skew(r_io - r_ic)
 
         u_mat = np.block([
             [np.identity(3), -l_io, np.zeros((3, 3)), np.zeros((3, 3))],
@@ -46,7 +50,7 @@ class RigidBody(Element):
 
 
 class EulerBernoulliBeam(Element):
-
+    # TODO: Add support for non-uniform beams (e.g. tapered, variable cross-section, etc.)
     def __init__(
             self,
             e_id: EntityID,
@@ -57,10 +61,8 @@ class EulerBernoulliBeam(Element):
             area: float,
             i_y: float,
             i_z: float,
-            slot_coords: Dict[EntityID, VectorLike]
     ):
-        slots_pos = {s_id: np.array(pos) for s_id, pos in slot_coords.items()}
-        super().__init__(e_id, slots_pos)
+        super().__init__(e_id)
 
         self.length = length
         self.rho = density
@@ -88,8 +90,9 @@ class EulerBernoulliBeam(Element):
     def _krylov_v(z: float) -> float:
         return (np.sinh(z) - np.sin(z)) / 2
 
-    def _u(self, output_pos: VectorLike, omega: float) -> Matrix:
-        x, y, z = output_pos
+    def _u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
+        # TODO: Potentially broken logic here because of the fixed XYZ-LWH coordinate system
+        x, y, z = output_pos - input_pos
 
         beta_x = np.sqrt(self.mu * omega**2 / (self.e * self.a))
         lam_y = np.power((self.mu * omega**2 / (self.e * self.iz)), 1/4)
@@ -139,14 +142,12 @@ class SpatialElasticHinge(Element):
             e_id: EntityID,
             k: Tuple[float, float, float],
             k_rot: Tuple[float, float, float],
-            slot_coords: Dict[EntityID, VectorLike]
     ):
         """
         :param k: Linear spring stiffnesses
         :param k_rot: Rotary spring torsional stiffnesses
         """
-        slots_pos = {s_id: np.array(pos) for s_id, pos in slot_coords.items()}
-        super().__init__(e_id, slots_pos)
+        super().__init__(e_id)
 
         k_mat = np.diag(- 1 / np.array(k))
         k_rot_mat = np.diag(1 / np.array(k_rot))
@@ -160,5 +161,5 @@ class SpatialElasticHinge(Element):
             [np.zeros((6, 6)), np.identity(6)],
         ])
 
-    def _u(self, _=None, __=None) -> Matrix:
+    def _u(self, _=None, __=None, ___=None) -> Matrix:
         return self._u_mat
