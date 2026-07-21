@@ -22,8 +22,9 @@ class MBS:
 
     def __init__(self):
         self._elements: Dict[EntityID, Element] = {}
-        # TODO: Refactor slots here
-        self._slot_occupancy: Dict[EntityID, Dict[EntityID | None, str | None]] = {}  # 'input', 'output' or None
+        self._elem_port_pos: Dict[EntityID, List[VectorLike]] = {}
+        self._elem_port_type: Dict[EntityID, List[str]] = {}
+        self._elem_main_port: Dict[EntityID, int] = {}
 
         self._root: Boundary | None = None
         self._tips: Dict[EntityID, Boundary] = {}
@@ -34,7 +35,7 @@ class MBS:
         self._internal_graph: nx.DiGraph = nx.DiGraph()
         self._user_graph: nx.DiGraph = nx.DiGraph()  # Graph entirely defined by user, for visualization and analysis
 
-        # For internal use only!
+        # For internal use only! Will not have any public-facing attribute.
         self._z_all_cache_invalid = True  # Flag to indicate if the overall state vector needs to be recomputed
         self._tree_generated = False
         self._successor_in_tree = {}
@@ -135,17 +136,27 @@ class MBS:
 
             self._elements[elem.e_id] = elem
             self._internal_graph.add_node(elem.e_id)
-            # Initializing slot status for the new element
-            occupancy_init: Dict[EntityID | None, str | None] = {None: None}  # init `None` a.k.a `MAIN` slot
-            for s in elem.slots_pos:
-                occupancy_init[s] = None
-            self._slot_occupancy[elem.e_id] = occupancy_init
+            # Initializing port entries for the new element
+            self._elem_port_pos[elem.e_id] = []
+            self._elem_port_type[elem.e_id] = []
+
             logger.debug("Adding element %r to the system.", elem.e_id)
 
         return self
 
-    def add_root(self, target_elem: ElemLike, output_slot: EntityID, boundary_sv: VectorLike) -> EntityID:
-        # NO SLOT OVERWRITE PROTECTION
+    def add_root(self, target_elem: ElemLike, boundary_sv: VectorLike, output_pos: VectorLike | None = None,
+                 output_port: int | None = None) -> EntityID:
+
+        if output_pos is None and output_port is None:
+            err_msg = "Either output_pos or output_port must be provided to add a root."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+        elif output_pos is not None and output_port is not None:
+            err_msg = "Only one of output_pos or output_port can be provided to add a root."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        # NO PORT OVERWRITE PROTECTION
         if self._root is not None:
             err_msg = f"Root boundary is already defined as [{self._root.b_id}]."
             logger.error(err_msg)
@@ -157,47 +168,77 @@ class MBS:
             logger.error(err_msg)
             raise KeyError(err_msg)
 
-        root_boundary = Boundary(b_id=f"{tgt_id}.{output_slot}, 0", state_vector=boundary_sv)
+        # Create a new port if needed, otherwise use the provided port index
+        port_idx = None
+        if output_pos is not None:
+            port_idx = len(self._elem_port_pos[tgt_id])
+            self._elem_port_pos[tgt_id].append(output_pos)
+            self._elem_port_type[tgt_id].append('output')
+        elif output_port is not None:
+            port_idx = output_port
+            self._elem_port_type[tgt_id][port_idx] = 'output'
+
+        # Create the root
+        root_boundary = Boundary(b_id=f"{tgt_id}.{port_idx}_root", state_vector=boundary_sv)
         # Cache the new root
         self._root = root_boundary
-        self._slot_occupancy[tgt_id][output_slot] = 'output'
         self._z_all_cache_invalid = True
         # Add it to the graph
         self._internal_graph.add_node(root_boundary.b_id)
-        self._internal_graph.add_edge(tgt_id, root_boundary.b_id, output_slot=output_slot, input_slot=None)
+        self._internal_graph.add_edge(tgt_id, root_boundary.b_id, output_port=port_idx)
 
-        logger.debug(f"Added [{root_boundary.b_id}] as the root boundary to element [{tgt_id}].")
+        logger.debug(f"Added [{root_boundary.b_id}] as the root boundary to element [{tgt_id}] at port [{port_idx}].")
 
         return root_boundary.b_id
 
-    def add_tip(self, target_element: ElemLike, input_slot: EntityID | None, boundary_sv: VectorLike) -> EntityID:
-        # NO SLOT OVERWRITE PROTECTION
+    def add_tip(self, target_element: ElemLike, boundary_sv: VectorLike, input_pos: VectorLike | None = None,
+                input_port: int | None = None) -> EntityID:
+
+        if input_pos is None and input_port is None:
+            err_msg = "Either input_pos or input_port must be provided to add a tip."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+        elif input_pos is not None and input_port is not None:
+            err_msg = "Only one of input_pos or input_port can be provided to add a tip."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        # NO PORT OVERWRITE PROTECTION
         tgt_id = self._resolve_elem_id(target_element)
         if tgt_id not in self._elements:
             err_msg = f"Cannot add tip: target element [{tgt_id}] is missing from the system."
             logger.error(err_msg)
             raise KeyError(err_msg)
 
-        tip_boundary = Boundary(b_id=f"{tgt_id}.{input_slot}, 0", state_vector=boundary_sv)
+        # Create a new port if needed, otherwise use the provided port index
+        port_idx = None
+
+        if input_pos is not None:
+            port_idx = len(self._elem_port_pos[tgt_id])
+            self._elem_port_pos[tgt_id].append(input_pos)
+            self._elem_port_type[tgt_id].append('input')
+            # Set port as main input if needed
+            if tgt_id not in self._elem_main_port:
+                self._elem_main_port[tgt_id] = port_idx
+
+        elif input_port is not None:
+            port_idx = input_port
+            self._elem_port_type[tgt_id][port_idx] = 'input'
+
+        # Create the tip boundary
+        tip_boundary = Boundary(b_id=f"tip_{tgt_id}.{port_idx}", state_vector=boundary_sv)
         # Cache the new tip boundary
         self._tips[tip_boundary.b_id] = tip_boundary
-        self._slot_occupancy[tgt_id][input_slot] = 'input'
         self._z_all_cache_invalid = True
         # Add to graph
         self._internal_graph.add_node(tip_boundary.b_id)
-        self._internal_graph.add_edge(tip_boundary.b_id, tgt_id, output_slot=None, input_slot=input_slot)
+        self._internal_graph.add_edge(tip_boundary.b_id, tgt_id, input_port=port_idx)
 
-        logger.debug(f"Added [{tip_boundary.b_id}] as a tip boundary to element [{tgt_id}].")
+        logger.debug(f"Added [{tip_boundary.b_id}] as a tip boundary to element [{tgt_id}] at port [{port_idx}].")
 
         return tip_boundary.b_id
 
-    def connect_elements(
-            self,
-            src: ElemLike,
-            dst: ElemLike,
-            src_pos: VectorLike,
-            dst_pos: VectorLike
-    ) -> MBS:
+    def connect_elements(self, src: ElemLike, dst: ElemLike, src_pos: VectorLike, dst_pos: VectorLike) -> MBS:
 
         src_id = self._resolve_elem_id(src)
         dst_id = self._resolve_elem_id(dst)
@@ -219,41 +260,21 @@ class MBS:
             logger.warning(f"{log_prefix} parallel edges between the same elements are not allowed.")
             return self
 
-        # Specific dispatching based on selected slot
-        # SOURCE ELEMENT
-        if src_slot is None:
-            err_msg = f"{log_prefix} slot [MAIN] cannot be used as an output."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-        try:
-            if self._slot_occupancy[src_id][src_slot] is not None:
-                err_msg = f"{log_prefix} slot [{src_slot}] of element [{src_id}] is already populated."
-                logger.error(err_msg)
-                raise ValueError(err_msg)
-        except KeyError:  # Undefined slots end up here
-            err_msg = (f"{log_prefix} slot [{src_slot}] is not defined for the source element "
-                       f"or cannot be used as an output.")
-            logger.error(err_msg)
-            raise KeyError(err_msg)
-
-        # DESTINATION ELEMENT
-        try:
-            if self._slot_occupancy[dst_id][dst_slot] is not None:
-                err_msg = (f"{log_prefix} slot [{"MAIN" if dst_slot is None else dst_slot}] "
-                           f"of element [{dst_id}] is already populated.")
-                logger.error(err_msg)
-                raise ValueError(err_msg)
-        except KeyError:
-            err_msg = f"{log_prefix} slot [{dst_slot}] is not defined for the destination element."
-            logger.error(err_msg)
-            raise KeyError(err_msg)
-
-        # After both elements are validated, they can be linked
-        logger.debug(f"{log_prefix} linking from source slot [{src_slot}] "
-                     f"to destination slot [{"MAIN" if dst_slot is None else dst_slot}].")
-        self._slot_occupancy[src_id][src_slot] = 'output'
-        self._slot_occupancy[dst_id][dst_slot] = 'input'
-        self._internal_graph.add_edge(src_id, dst_id, output_slot=src_slot, input_slot=dst_slot)
+        # After pre-checks are run, the elements can be linked
+        # Creating ports
+        out_port_idx = len(self._elem_port_pos[src_id])
+        in_port_idx = len(self._elem_port_pos[dst_id])
+        self._elem_port_pos[src_id].append(src_pos)
+        self._elem_port_type[src_id].append('output')
+        self._elem_port_pos[dst_id].append(dst_pos)
+        self._elem_port_type[dst_id].append('input')
+        # Set port as main input if needed
+        if dst_id not in self._elem_main_port:
+            self._elem_main_port[dst_id] = in_port_idx
+        # Linking
+        logger.debug(f"{log_prefix} linking from source port [{src_id}.{out_port_idx}] "
+                     f"to destination port [{dst_id}.{in_port_idx}].")
+        self._internal_graph.add_edge(src_id, dst_id, output_port=out_port_idx, input_port=in_port_idx)
 
         return self
 
@@ -268,8 +289,8 @@ class MBS:
         log_prefix = f"Cutting [{src_id}] -/> [{dst_id}]:"
 
         try:
-            src_slot = self._internal_graph[src_id][dst_id]['output_slot']
-            dst_slot = self._internal_graph[src_id][dst_id]['input_slot']
+            src_port_idx = self._internal_graph[src_id][dst_id]['output_port']
+            dst_port_idx = self._internal_graph[src_id][dst_id]['input_port']
         except KeyError:
             err_msg = f"{log_prefix} specified connection does not exist in the system."
             logger.error(err_msg)
@@ -290,8 +311,8 @@ class MBS:
                 try:
                     # It would be mathematically equivalent to have root in b_id2,
                     # but it makes more sense to conserve the root during reduction
-                    b_id1 = self.add_root(self._elements[src_id], src_slot, NULL_SV)
-                    b_id2 = self.add_tip(self._elements[dst_id], dst_slot, NULL_SV)
+                    b_id1 = self.add_root(self._elements[src_id], NULL_SV, output_port=src_port_idx)
+                    b_id2 = self.add_tip(self._elements[dst_id], NULL_SV, input_port=dst_port_idx)
                     # Cutting a connection in this case generates a new virtual INPUT/OUTPUT pair.
                     # No C sign matrix will be needed. Both state vectors are equal
                     cut = CutPoint(b_id1, b_id2, False)
@@ -308,8 +329,8 @@ class MBS:
                 raise ValueError(err_msg)
 
         else:
-            b_id1 = self.add_tip(self._elements[src_id], src_slot, NULL_SV)
-            b_id2 = self.add_tip(self._elements[dst_id], dst_slot, NULL_SV)
+            b_id1 = self.add_tip(self._elements[src_id], NULL_SV, input_port=src_port_idx)
+            b_id2 = self.add_tip(self._elements[dst_id], NULL_SV, input_port=dst_port_idx)
             # Cutting a connection in this case generates two new virtual INPUT tips/boundaries.
             # C sign matrix will be needed
             cut = CutPoint(b_id1, b_id2)
@@ -391,19 +412,19 @@ class MBS:
 
         logger.debug(f"Validated topology.")
 
-        # Buffer the output slot of all element/boundary nodes to speed up the transfer matrix calculations
+        # Buffer the output port of all element/boundary nodes to speed up the transfer matrix calculations
         for e in self._elements:
             successor = next(self._internal_graph.successors(e))
-            out_slot = next(
-                slot
-                for slot, value in self._slot_occupancy[e].items()
-                if value == "output"
+            out_port_pos = next(
+                port_pos
+                for port_pos, port_type in zip(self._elem_port_pos[e], self._elem_port_type[e])
+                if port_type == 'output'
             )
-            self._successor_in_tree[e] = {'output_slot': out_slot, 'next': successor}
+            self._successor_in_tree[e] = {'output_pos': out_port_pos, 'next': successor}
         # Same operation on the tips (we exclude the root as it has no output)
         for t_id in self._tips:
             successor = next(self._internal_graph.successors(t_id))
-            self._successor_in_tree[t_id] = {'output_slot': None, 'next': successor}
+            self._successor_in_tree[t_id] = {'output_pos': None, 'next': successor}
 
         # Next, we buffer what elements have what upstream tips. We don't want to keep testing unreachable elements.
         for e in self._elements:
@@ -442,16 +463,16 @@ class MBS:
         for i in range(len(path) - 1):
             e1, e2 = path[i], path[i + 1]
 
-            e2_elem = self._elements[e2]
-            input_slot = self.tree[e1][e2]['input_slot']
-            # Retrieve the position of the output
-            output_slot = self._successor_in_tree[e2]['output_slot']
-            out_pos = e2_elem.slots_pos[output_slot]
-            # Here we apply the transfer matrix for the element e2 based on its input slot (input_slot)
-            if input_slot is None:
-                u_chain = e2_elem.u(out_pos, omega) @ u_chain
+            e2_elem = self._elements[e2]  # Because of the way we use the path, e2 can never be a boundary (root here)
+            e2_input_port_idx: int = self.tree[e1][e2]['input_port']
+            # Retrieve the port positions
+            e2_in_pos: VectorLike = self._elem_port_pos[e2][e2_input_port_idx]
+            e2_out_pos: VectorLike = self._successor_in_tree[e2]['output_pos']
+            # Here we apply the transfer matrix for the element e2 based on its input and output ports
+            if e2_input_port_idx == self._elem_main_port[e2]:
+                u_chain = e2_elem.u(e2_in_pos, e2_out_pos, omega) @ u_chain
             else:
-                u_chain = e2_elem.u_ext(out_pos, input_slot) @ u_chain
+                u_chain = e2_elem.u_ext(e2_in_pos, e2_out_pos) @ u_chain
 
         return u_chain
 
@@ -488,11 +509,13 @@ class MBS:
 
                 # Extract the pure kinematics transformation matrix (no negative signs!)
                 u_chain = self.transfer_mat_along_path(path, omega)
-                input_slot = self.tree[branch_node][m_id]['input_slot']
-                if input_slot is None:
-                    k_mat = self._elements[m_id].h_ext @ u_chain
-                else:
-                    k_mat = self._elements[m_id].h_incs[input_slot] @ u_chain
+                input_port_idx: int = self.tree[branch_node][m_id]['input_port']
+                main_port_idx: int = self._elem_main_port[m_id]
+                input_port_pos: VectorLike = self._elem_port_pos[m_id][input_port_idx]
+                main_port_pos: VectorLike = self._elem_port_pos[m_id][main_port_idx]
+
+                k_mat = self._elements[m_id].h(ref_pos=main_port_pos, input_pos=input_port_pos) @ u_chain
+
                 k_mats[t_id] = k_mat
 
             # Generate exactly (N - 1) sets of geometric constraints
@@ -673,14 +696,17 @@ class MBS:
                 continue
             # Info about the next element
             next_elem = self._elements[next_id]
-            input_slot = self.tree[head_id][next_id]['input_slot']
-            output_slot = self._successor_in_tree[next_id]['output_slot']
-            output_pos = next_elem.slots_pos[output_slot]
+            # I/O for next_elem
+            next_input_port_idx: int = self.tree[head_id][next_id]['input_port']
+            next_output_port_idx: int = self._successor_in_tree[next_id]['output_port']
+            next_main_port_idx = self._elem_main_port[next_id]
+            next_input_pos = self._elem_port_pos[next_id][next_input_port_idx]
+            next_output_pos = self._elem_port_pos[next_id][next_output_port_idx]
             # Add to the output state vector of the next element
-            if input_slot is None:
-                sv = next_elem.u(output_pos, omega) @ state_vecs[head_id]
+            if next_input_port_idx == next_main_port_idx:
+                sv = next_elem.u(next_input_pos, next_output_pos, omega) @ state_vecs[head_id]
             else:
-                sv = next_elem.u_ext(output_pos, input_slot) @ state_vecs[head_id]
+                sv = next_elem.u_ext(next_input_pos, next_output_pos) @ state_vecs[head_id]
             state_vecs[next_id] += sv
             # If the next element has already been used as a head, we don't need to add it again
             if not searched[next_id]:

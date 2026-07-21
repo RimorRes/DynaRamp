@@ -59,8 +59,8 @@ def create_mass_spring_oscillator():
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
-    system.add_root(mass_elem2, 'output', root_boundary)
-    system.add_tip(spring_elem, None, tip_boundary)
+    system.add_root(mass_elem2, root_boundary, 'output')
+    system.add_tip(spring_elem, tip_boundary, None)
 
     system.make_tree()
 
@@ -111,11 +111,11 @@ def create_parallel_mass_spring_oscillator(n):
             dst = 'aux' + str(i)
         system.connect_elements(spring, mass_elem, src_slot='output', dst_slot=dst)
         tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
-        system.add_tip(spring, None, tip_boundary)
+        system.add_tip(spring, tip_boundary, None)
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
-    system.add_root(mass_elem, 'output', root_boundary)
+    system.add_root(mass_elem, root_boundary, 'output')
 
     system.make_tree()
 
@@ -178,8 +178,8 @@ def create_simple_multi_output_system():
     tip_sv = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
     root_sv = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
 
-    system.add_root(mass_4, 'output', root_sv)
-    system.add_tip(mass_1, None, tip_sv)
+    system.add_root(mass_4, root_sv, 'output')
+    system.add_tip(mass_1, tip_sv, None)
 
     system.make_tree()
 
@@ -288,8 +288,8 @@ def create_static_loading():
     system.add_elements([mass_1, spring_2])
     system.connect_elements(mass_1, spring_2, src_slot='output', dst_slot=None)
 
-    system.add_root(spring_2, 'output', np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1]))
-    system.add_tip(mass_1, None, np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1]))
+    system.add_root(spring_2, np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1]), 'output')
+    system.add_tip(mass_1, np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1]), None)
 
     system.make_tree()
 

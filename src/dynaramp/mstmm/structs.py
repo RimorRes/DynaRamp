@@ -19,7 +19,7 @@ NULL_SV.setflags(write=False)
 
 type ElemLike = EntityID | Element
 
-# TODO: QoL: better slot definition (main slot and relative coords) and add copy method
+# TODO: QoL: make sure copy/deepcopy work as intended
 # TODO: Constructor using geometry primitives
 # TODO: Add support for rotations
 

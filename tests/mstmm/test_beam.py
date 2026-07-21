@@ -29,8 +29,8 @@ def create_cantilever_beam():
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
-    system.add_root(beam_elem, 'end', root_boundary)
-    system.add_tip(beam_elem, None, tip_boundary)
+    system.add_root(beam_elem, root_boundary, 'end')
+    system.add_tip(beam_elem, tip_boundary, None)
 
     system.make_tree()
 
