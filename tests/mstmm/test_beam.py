@@ -19,8 +19,7 @@ def create_cantilever_beam():
         shear_mod=80e9,
         area=b*h,
         i_y=i_y,
-        i_z=i_z,
-        slot_coords={'end': (length, 0, 0)},
+        i_z=i_z
     )
 
     system.add_elements(beam_elem)
@@ -29,8 +28,8 @@ def create_cantilever_beam():
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
-    system.add_root(beam_elem, root_boundary, 'end')
-    system.add_tip(beam_elem, tip_boundary, None)
+    system.add_root(beam_elem, root_boundary, output_pos=(length, 0, 0))
+    system.add_tip(beam_elem, tip_boundary, input_pos=(0, 0, 0))
 
     system.make_tree()
 

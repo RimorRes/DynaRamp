@@ -13,10 +13,7 @@ def create_mass_spring_oscillator():
         e_id='mass',
         mass=m1,
         inertia=m1 * unit_inertia,
-        com=(0, 0, s/2),
-        slot_coords={
-            'output': (0, 0, s)
-        }
+        com=(0, 0, s/2)
     )
 
     length = 1
@@ -24,10 +21,7 @@ def create_mass_spring_oscillator():
     spring_elem = dyn.SpatialElasticHinge(
         e_id='spring',
         k=(np.inf, np.inf, k),
-        k_rot=(np.inf, np.inf, np.inf),
-        slot_coords={
-            'output': (0, 0, length)
-        }
+        k_rot=(np.inf, np.inf, np.inf)
     )
 
     m2 = 5
@@ -35,32 +29,26 @@ def create_mass_spring_oscillator():
         e_id='mass2',
         mass=m2,
         inertia=unit_inertia,
-        com=(0, 0, s / 2),
-        slot_coords={
-            'output': (0, 0, s)
-        }
+        com=(0, 0, s / 2)
     )
 
     spring_elem2 = dyn.SpatialElasticHinge(
         e_id='spring2',
         k=(np.inf, np.inf, k),
-        k_rot=(np.inf, np.inf, np.inf),
-        slot_coords={
-            'output': (0, 0, length)
-        }
+        k_rot=(np.inf, np.inf, np.inf)
     )
 
     system.add_elements([spring_elem, mass_elem, spring_elem2, mass_elem2])
-    system.connect_elements(spring_elem, mass_elem, src_slot='output', dst_slot=None)
-    system.connect_elements(mass_elem, spring_elem2, src_slot='output', dst_slot=None)
-    system.connect_elements(spring_elem2, mass_elem2, src_slot='output', dst_slot=None)
+    system.connect_elements(spring_elem, mass_elem, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
+    system.connect_elements(mass_elem, spring_elem2, src_pos=(0, 0, s), dst_pos=(0, 0, 0))
+    system.connect_elements(spring_elem2, mass_elem2, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
-    system.add_root(mass_elem2, root_boundary, 'output')
-    system.add_tip(spring_elem, tip_boundary, None)
+    system.add_root(mass_elem2, root_boundary, output_pos=(0, 0, s))
+    system.add_tip(spring_elem, tip_boundary, input_pos=(0, 0, 0))
 
     system.make_tree()
 
@@ -73,17 +61,12 @@ def create_parallel_mass_spring_oscillator(n):
     m = 5
     s = 1
     unit_inertia = 1 / 6 * s ** 2 * np.eye(3)
-    slot_coords = {
-        'output': (0, 0, s)
-    }
-    for i in range(n):
-        slot_coords['aux' + str(i)] = (0, 0, 0)
+
     mass_elem = dyn.RigidBody(
         e_id='mass',
         mass=m,
         inertia=m * unit_inertia,
-        com=(0, 0, s / 2),
-        slot_coords=slot_coords
+        com=(0, 0, s / 2)
     )
 
     length = 1
@@ -94,28 +77,21 @@ def create_parallel_mass_spring_oscillator(n):
         i_spring = dyn.SpatialElasticHinge(
             e_id='spring' + str(i),
             k=(k_penalty, k_penalty, k),
-            k_rot=(k_penalty, k_penalty, k_penalty),
-            slot_coords={
-                'output': (0, 0, length)
-            }
+            k_rot=(k_penalty, k_penalty, k_penalty)
         )
         spring_elems.append(i_spring)
 
     system.add_elements(mass_elem)
 
     system.add_elements(spring_elems)
-    for i, spring in enumerate(spring_elems):
-        if i == 0:
-            dst = None
-        else:
-            dst = 'aux' + str(i)
-        system.connect_elements(spring, mass_elem, src_slot='output', dst_slot=dst)
+    for spring in spring_elems:
+        system.connect_elements(spring, mass_elem, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
         tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
-        system.add_tip(spring, tip_boundary, None)
+        system.add_tip(spring, tip_boundary, (0, 0, 0))
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
-    system.add_root(mass_elem, root_boundary, 'output')
+    system.add_root(mass_elem, root_boundary, output_pos=(0, 0, s))
 
     system.make_tree()
 
@@ -132,21 +108,13 @@ def create_simple_multi_output_system():
         e_id='mass_1',
         mass=m,
         inertia=m * unit_inertia,
-        com=(0, 0, s / 2),
-        slot_coords={
-            'out_1,2': (-s / 2, 0, s),
-            'out_1,3': (s / 2, 0, s)
-        }
+        com=(0, 0, s / 2)
     )
     mass_4 = dyn.RigidBody(
         e_id='mass_4',
         mass=m,
         inertia=m * unit_inertia,
-        com=(s / 2, 0, s / 2),
-        slot_coords={
-            'aux_in': (s, 0, s),
-            'output': (s / 2, 0, s)
-        }
+        com=(s / 2, 0, s / 2)
     )
 
     length = 1
@@ -155,31 +123,25 @@ def create_simple_multi_output_system():
     spring_2 = dyn.SpatialElasticHinge(
         e_id='spring_2',
         k=(k_penalty, k_penalty, k),
-        k_rot=(k_penalty, k_penalty, k_penalty),
-        slot_coords={
-            'output': (0, 0, length)
-        }
+        k_rot=(k_penalty, k_penalty, k_penalty)
     )
     spring_3 = dyn.SpatialElasticHinge(
         e_id='spring_3',
         k=(k_penalty, k_penalty, k),
-        k_rot=(k_penalty, k_penalty, k_penalty),
-        slot_coords={
-            'output': (0, 0, length)
-        }
+        k_rot=(k_penalty, k_penalty, k_penalty)
     )
 
     system.add_elements([mass_1, spring_2, spring_3, mass_4])
-    system.connect_elements(mass_1, spring_2, src_slot='out_1,2', dst_slot=None)
-    system.connect_elements(mass_1, spring_3, src_slot='out_1,3', dst_slot=None)
-    system.connect_elements(spring_2, mass_4, src_slot='output', dst_slot=None)
-    system.connect_elements(spring_3, mass_4, src_slot='output', dst_slot='aux_in')
+    system.connect_elements(mass_1, spring_2, src_pos=(-s / 2, 0, s), dst_pos=(0, 0, 0))
+    system.connect_elements(mass_1, spring_3, src_pos=(s / 2, 0, s), dst_pos=(0, 0, 0))
+    system.connect_elements(spring_2, mass_4, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
+    system.connect_elements(spring_3, mass_4, src_pos=(0, 0, length), dst_pos=(s, 0, s),)
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     tip_sv = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
     root_sv = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
 
-    system.add_root(mass_4, root_sv, 'output')
-    system.add_tip(mass_1, tip_sv, None)
+    system.add_root(mass_4, root_sv, output_pos=(s / 2, 0, s))
+    system.add_tip(mass_1, tip_sv, input_pos=(0, 0, 0))
 
     system.make_tree()
 
@@ -207,45 +169,33 @@ def create_simple_closed_loop_system(auto_cut: bool = False):
         e_id='mass_1',
         mass=m,
         inertia=inertia,
-        com=(-width / 2, 0, height / 2),
-        slot_coords={
-            'out_1,2': (0, 0, height)
-        }
+        com=(-width / 2, 0, height / 2)
     )
 
     spring_2 = dyn.SpatialElasticHinge(
         e_id='spring_2',
         k=(k, k_penalty, k_penalty),
-        k_rot=(k_penalty, k_penalty, k_penalty),
-        slot_coords={
-            'out_2,3': (length, 0, 0)
-        }
+        k_rot=(k_penalty, k_penalty, k_penalty)
     )
 
     mass_3 = dyn.RigidBody(
         e_id='mass_3',
         mass=m,
         inertia=inertia,
-        com=(width / 2, 0, -height / 2),
-        slot_coords={
-            'out_3,4': (0, 0, -height)
-        }
+        com=(width / 2, 0, -height / 2)
     )
 
     spring_4 = dyn.SpatialElasticHinge(
         e_id='spring_4',
         k=(k, k_penalty, k_penalty),
-        k_rot=(k_penalty, k_penalty, k_penalty),
-        slot_coords={
-            'out_4,1': (-length, 0, 0)
-        }
+        k_rot=(k_penalty, k_penalty, k_penalty)
     )
 
     system.add_elements((mass_1, spring_2, mass_3, spring_4))
-    system.connect_elements(mass_1, spring_2, src_slot='out_1,2', dst_slot=None)
-    system.connect_elements(spring_2, mass_3, src_slot='out_2,3', dst_slot=None)
-    system.connect_elements(mass_3, spring_4, src_slot='out_3,4', dst_slot=None)
-    system.connect_elements(spring_4, mass_1, src_slot='out_4,1', dst_slot=None)
+    system.connect_elements(mass_1, spring_2, src_pos=(0, 0, height), dst_pos=(0, 0, 0))
+    system.connect_elements(spring_2, mass_3, src_pos=(length, 0, 0), dst_pos=(0, 0, 0))
+    system.connect_elements(mass_3, spring_4, src_pos=(0, 0, -height), dst_pos=(0, 0, 0))
+    system.connect_elements(spring_4, mass_1, src_pos=(-length, 0, 0), dst_pos=(0, 0, 0))
     if not auto_cut:
         system.cut_connection((spring_4, mass_1))
 
@@ -265,10 +215,7 @@ def create_static_loading():
         e_id='mass_1',
         mass=m,
         inertia=m * unit_inertia,
-        com=(0, 0, s / 2),
-        slot_coords={
-            'output': (0, 0, s)
-        }
+        com=(0, 0, s / 2)
     )
 
     length = 1
@@ -277,19 +224,16 @@ def create_static_loading():
     spring_2 = dyn.SpatialElasticHinge(
         e_id='spring_2',
         k=(k_penalty, k_penalty, k),
-        k_rot=(k_penalty, k_penalty, k_penalty),
-        slot_coords={
-            'output': (0, 0, length)
-        }
+        k_rot=(k_penalty, k_penalty, k_penalty)
     )
 
     mass_1.apply_force(force=(0, 0, -9.81*m), point=(0, 0, s / 2))
 
     system.add_elements([mass_1, spring_2])
-    system.connect_elements(mass_1, spring_2, src_slot='output', dst_slot=None)
+    system.connect_elements(mass_1, spring_2, src_pos=(0, 0, s), dst_pos=(0, 0, 0))
 
-    system.add_root(spring_2, np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1]), 'output')
-    system.add_tip(mass_1, np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1]), None)
+    system.add_root(spring_2, np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1]), output_pos=(0, 0, length))
+    system.add_tip(mass_1, np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1]), input_pos=(0, 0, 0))
 
     system.make_tree()
 

@@ -38,7 +38,7 @@ class MBS:
         # For internal use only! Will not have any public-facing attribute.
         self._z_all_cache_invalid = True  # Flag to indicate if the overall state vector needs to be recomputed
         self._tree_generated = False
-        self._successor_in_tree = {}
+        self._elem_output_info = {}
         self._upstream_tips = {}
 
     # Read-only attributes
@@ -414,17 +414,17 @@ class MBS:
 
         # Buffer the output port of all element/boundary nodes to speed up the transfer matrix calculations
         for e in self._elements:
-            successor = next(self._internal_graph.successors(e))
-            out_port_pos = next(
+            successor = next(self._internal_graph.successors(e))  # Element linked to e's output
+            out_port_pos = next(  # Position of e's output
                 port_pos
                 for port_pos, port_type in zip(self._elem_port_pos[e], self._elem_port_type[e])
                 if port_type == 'output'
             )
-            self._successor_in_tree[e] = {'output_pos': out_port_pos, 'next': successor}
+            self._elem_output_info[e] = {'output_pos': out_port_pos, 'next': successor}
         # Same operation on the tips (we exclude the root as it has no output)
         for t_id in self._tips:
             successor = next(self._internal_graph.successors(t_id))
-            self._successor_in_tree[t_id] = {'output_pos': None, 'next': successor}
+            self._elem_output_info[t_id] = {'output_pos': None, 'next': successor}
 
         # Next, we buffer what elements have what upstream tips. We don't want to keep testing unreachable elements.
         for e in self._elements:
@@ -448,7 +448,7 @@ class MBS:
         while node != tgt:
             path.append(node)
             try:
-                node = self._successor_in_tree[node]['next']
+                node = self._elem_output_info[node]['next']
             except KeyError:
                 err_msg = f"No path found from [{src}] to [{tgt}]."
                 logger.warning(err_msg)
@@ -467,7 +467,7 @@ class MBS:
             e2_input_port_idx: int = self.tree[e1][e2]['input_port']
             # Retrieve the port positions
             e2_in_pos: VectorLike = self._elem_port_pos[e2][e2_input_port_idx]
-            e2_out_pos: VectorLike = self._successor_in_tree[e2]['output_pos']
+            e2_out_pos: VectorLike = self._elem_output_info[e2]['output_pos']
             # Here we apply the transfer matrix for the element e2 based on its input and output ports
             if e2_input_port_idx == self._elem_main_port[e2]:
                 u_chain = e2_elem.u(e2_in_pos, e2_out_pos, omega) @ u_chain
@@ -689,7 +689,7 @@ class MBS:
 
         while search_heads:
             head_id = search_heads.popleft()
-            next_id = self._successor_in_tree[head_id]['next']
+            next_id = self._elem_output_info[head_id]['next']
 
             if next_id not in self._elements:
                 # Also synonymous with the next node being the root
@@ -698,10 +698,9 @@ class MBS:
             next_elem = self._elements[next_id]
             # I/O for next_elem
             next_input_port_idx: int = self.tree[head_id][next_id]['input_port']
-            next_output_port_idx: int = self._successor_in_tree[next_id]['output_port']
             next_main_port_idx = self._elem_main_port[next_id]
             next_input_pos = self._elem_port_pos[next_id][next_input_port_idx]
-            next_output_pos = self._elem_port_pos[next_id][next_output_port_idx]
+            next_output_pos = self._elem_output_info[next_id]['output_pos']
             # Add to the output state vector of the next element
             if next_input_port_idx == next_main_port_idx:
                 sv = next_elem.u(next_input_pos, next_output_pos, omega) @ state_vecs[head_id]
