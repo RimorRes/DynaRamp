@@ -15,7 +15,9 @@ from .structs import NULL_SV, Element, ElemLike, Boundary, CutPoint
 logger = logging.getLogger(__name__)
 
 # TODO: better error raising, custom exceptions?
-# TODO: Clean up z_rem, z_red, rem_boundaries clutter (Results class? or aggregate params/returns?)
+# TODO: Clean up z_rem, z_red, rem_boundaries clutter for state propagation
+# TODO: Add rich results classes
+# TODO: PRIORITY: separate MBS class into topology handler and computation
 
 
 class MBS:
@@ -120,6 +122,22 @@ class MBS:
         logger.error(err_msg)
         raise TypeError(err_msg)
 
+    def _has_port_capacity(self, elem: Element) -> Tuple[bool, bool]:
+        """
+        Checks remaining capacity for input and output ports.
+        Return whether the element can accept additional input and output connections.
+        :param elem:
+        :return: A tuple `(can_add_input, can_add_output)`
+        """
+        eid = self._resolve_elem_id(elem)
+
+        ports = self._elem_port_type[eid]
+
+        input_count = ports.count('input')
+        output_count = ports.count('output')
+
+        return input_count < elem.MAX_INPUTS, output_count < elem.MAX_OUTPUTS
+
     def add_elements(self, elems: Element | Iterable[Element]) -> MBS:
         if isinstance(elems, Iterable):
             elem_iterable = elems
@@ -171,9 +189,16 @@ class MBS:
         # Create a new port if needed, otherwise use the provided port index
         port_idx = None
         if output_pos is not None:
+            # Check if the target can accept an additional output
+            if not self._has_port_capacity(self._elements[tgt_id])[1]:
+                err_msg = f"Cannot add root: target element [{tgt_id}] has reached its maximum output capacity."
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+
             port_idx = len(self._elem_port_pos[tgt_id])
             self._elem_port_pos[tgt_id].append(output_pos)
             self._elem_port_type[tgt_id].append('output')
+
         elif output_port is not None:
             port_idx = output_port
             self._elem_port_type[tgt_id][port_idx] = 'output'
@@ -214,6 +239,12 @@ class MBS:
         port_idx = None
 
         if input_pos is not None:
+            # Check if the target can accept an additional input
+            if not self._has_port_capacity(self._elements[tgt_id])[0]:
+                err_msg = f"Cannot add tip: target element [{tgt_id}] has reached its maximum input capacity."
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+
             port_idx = len(self._elem_port_pos[tgt_id])
             self._elem_port_pos[tgt_id].append(input_pos)
             self._elem_port_type[tgt_id].append('input')
@@ -259,6 +290,16 @@ class MBS:
         if (src_id, dst_id) in self._internal_graph.edges:
             logger.warning(f"{log_prefix} parallel edges between the same elements are not allowed.")
             return self
+
+        # Check if the src (resp. dst) can accept an additional output (resp. input).
+        if not self._has_port_capacity(self._elements[src_id])[1]:
+            err_msg = f"{log_prefix} source element [{src_id}] has reached its maximum output capacity."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+        if not self._has_port_capacity(self._elements[dst_id])[0]:
+            err_msg = f"{log_prefix} destination element [{dst_id}] has reached its maximum input capacity."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
 
         # After pre-checks are run, the elements can be linked
         # Creating ports
@@ -472,7 +513,7 @@ class MBS:
             if e2_input_port_idx == self._elem_main_port[e2]:
                 u_chain = e2_elem.u(e2_in_pos, e2_out_pos, omega) @ u_chain
             else:
-                u_chain = e2_elem.u_ext(e2_in_pos, e2_out_pos) @ u_chain
+                u_chain = e2_elem.u_extract(e2_in_pos, e2_out_pos) @ u_chain
 
         return u_chain
 
@@ -705,7 +746,7 @@ class MBS:
             if next_input_port_idx == next_main_port_idx:
                 sv = next_elem.u(next_input_pos, next_output_pos, omega) @ state_vecs[head_id]
             else:
-                sv = next_elem.u_ext(next_input_pos, next_output_pos) @ state_vecs[head_id]
+                sv = next_elem.u_extract(next_input_pos, next_output_pos) @ state_vecs[head_id]
             state_vecs[next_id] += sv
             # If the next element has already been used as a head, we don't need to add it again
             if not searched[next_id]:
@@ -784,7 +825,7 @@ class MBS:
 
             logger.info(f"Mode candidate at {res.x:.3e} rad/s.")
             logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
-            # If rcond passes the tolerance, save the frequency and mode shape
+            # If rcond passes the tolerance, save the frequency and mode states
             if rcond < rtol:
                 all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_rem=z_rem,
                                                       rem_boundary_ids=rem_bounds)  # or Vh[-1].T for the mode shape
@@ -799,4 +840,5 @@ class MBS:
         return modes[:n_modes]
 
     def solve(self):
+        # TODO: move some of the logic here
         raise NotImplementedError

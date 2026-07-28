@@ -5,29 +5,98 @@ from typing import Tuple
 
 import numpy as np
 
-from .structs import Element
+from .structs import DiscreteElement, ContinuousElement, MasslessMixin
 from common.vecmath import skew_sym_mat
 from common.types import EntityID, Vector, VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 
 
-class RigidBody(Element):
+class JunctionNode(MasslessMixin, DiscreteElement):
+
+    def __init__(self, e_id: EntityID):
+        super().__init__(e_id)
+
+    @staticmethod
+    def _u(_=None, __=None, ___=None) -> Matrix:
+        return np.identity(13)
+
+
+class SpatialElasticHinge(MasslessMixin, DiscreteElement):
+
+    def __init__(
+            self,
+            e_id: EntityID,
+            k: Tuple[float, float, float],
+            k_rot: Tuple[float, float, float],
+    ):
+        """
+        :param k: Linear spring stiffnesses
+        :param k_rot: Rotary spring torsional stiffnesses
+        """
+        super().__init__(e_id)
+
+        k_mat = np.diag(- 1 / np.array(k))
+        k_rot_mat = np.diag(1 / np.array(k_rot))
+
+        k_block = np.block([
+            [np.zeros((3, 3)), k_mat],
+            [k_rot_mat, np.zeros((3, 3))]
+        ])
+        self._u_mat = np.block([
+            [np.identity(6), k_block],
+            [np.zeros((6, 6)), np.identity(6)],
+        ])
+
+    def _u(self, _, __, ___) -> Matrix:
+        return self._u_mat
+
+
+class LumpedMass(DiscreteElement):
+
+    def __init__(self, e_id: EntityID, mass: float):
+        super().__init__(e_id)
+
+        self.mass = mass
+        self._m_mat = np.block([
+            [self.mass * np.identity(3), np.zeros((3, 3))],
+            [np.zeros((3, 6))]
+        ])
+
+    def _u(self, _, __, omega: float) -> Matrix:
+        u_mat = np.identity(13)
+        u_mat[9:12, 0:3] = self.mass * omega**2 * np.identity(3)
+        return u_mat
+
+    @property
+    def _m_param_mat(self) -> Matrix:
+        return self._m_mat
+
+
+class RigidBody(DiscreteElement):
+
+    MAX_INPUTS = -1
+    MAX_OUTPUTS = -1
 
     def __init__(
             self,
             e_id: EntityID,
             mass: float,
             inertia: Matrix,
-            com: VectorLike,
+            com: VectorLike = (0, 0, 0),
     ):
+        """
+
+        :param e_id: Unique element ID
+        :param mass: Mass of the body
+        :param inertia: Inertia with respect to the center of mass, in the body frame
+        :param com: Center of mass position with respect to the body's origin.
+        """
         super().__init__(e_id)
 
         self.mass = mass
         self.inertia = inertia
         self.com_pos = np.array(com)
-        r = - self.com_pos
-        self.j = inertia + mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
 
     def _u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         # The vector FROM the input TO the output
@@ -36,6 +105,9 @@ class RigidBody(Element):
         # The vector FROM the input TO the center of mass
         r_ic = self.com_pos - input_pos
 
+        # Inertia matrix with respect to the input, parallel axis theorem (quadratic form so sign of r_ic is irrelevant)
+        j = self.inertia + self.mass * (np.dot(r_ic, r_ic) * np.identity(3) - np.outer(r_ic, r_ic))
+
         l_io = skew_sym_mat(r_io)
         l_ic = skew_sym_mat(r_ic)
         l_co = l_io - l_ic  # Mathematically equivalent to skew(r_io - r_ic)
@@ -43,13 +115,20 @@ class RigidBody(Element):
         u_mat = np.block([
             [np.identity(3), -l_io, np.zeros((3, 3)), np.zeros((3, 3))],
             [np.zeros((3, 3)), np.identity(3), np.zeros((3, 3)), np.zeros((3, 3))],
-            [self.mass * (omega**2) * l_co, -(omega**2) * (self.mass * l_io @ l_ic + self.j), np.identity(3), l_io],
+            [self.mass * (omega**2) * l_co, -(omega**2) * (self.mass * l_io @ l_ic + j), np.identity(3), l_io],
             [self.mass * (omega**2) * np.identity(3), -self.mass * (omega**2) * l_ic, np.zeros((3, 3)), np.identity(3)],
         ])
         return u_mat
 
+    @property
+    def _m_param_mat(self):
+        return np.block([
+            [self.mass * np.identity(3), np.zeros((3, 3))],
+            [np.zeros((3, 3)), self.inertia]
+        ])
 
-class EulerBernoulliBeam(Element):
+
+class EulerBernoulliBeam(ContinuousElement):
     # TODO: Add support for non-uniform beams (e.g. tapered, variable cross-section, etc.)
     def __init__(
             self,
@@ -134,32 +213,6 @@ class EulerBernoulliBeam(Element):
 
         return u_mat
 
-
-class SpatialElasticHinge(Element):
-
-    def __init__(
-            self,
-            e_id: EntityID,
-            k: Tuple[float, float, float],
-            k_rot: Tuple[float, float, float],
-    ):
-        """
-        :param k: Linear spring stiffnesses
-        :param k_rot: Rotary spring torsional stiffnesses
-        """
-        super().__init__(e_id)
-
-        k_mat = np.diag(- 1 / np.array(k))
-        k_rot_mat = np.diag(1 / np.array(k_rot))
-
-        k_block = np.block([
-            [np.zeros((3, 3)), k_mat],
-            [k_rot_mat, np.zeros((3, 3))]
-        ])
-        self._u_mat = np.block([
-            [np.identity(6), k_block],
-            [np.zeros((6, 6)), np.identity(6)],
-        ])
-
-    def _u(self, _=None, __=None, ___=None) -> Matrix:
-        return self._u_mat
+    @property
+    def _m_bar_param_mat(self) -> Matrix:
+        return np.diag([self.mu, self.mu, self.mu, self.rho * self.jp, 0, 0])

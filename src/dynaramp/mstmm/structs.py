@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Dict
 
 import numpy as np
+from scipy import integrate
 
 from common.vecmath import skew_sym_mat
 from common.types import EntityID, Vector, VectorLike, Matrix
@@ -26,6 +27,9 @@ type ElemLike = EntityID | Element
 
 class Element(ABC):
 
+    MAX_INPUTS = 1
+    MAX_OUTPUTS = 1
+
     def __init__(self, e_id: EntityID):
         self.e_id = e_id
 
@@ -33,7 +37,7 @@ class Element(ABC):
 
         # Caches
         self._h_cache: Dict[bytes, Matrix] = {}
-        self._u_ext_cache: Dict[bytes, Matrix] = {}
+        self._u_extract_cache: Dict[bytes, Matrix] = {}
 
     def u(self, input_pos: VectorLike, output_pos: VectorLike, omega: float) -> Matrix:
         """
@@ -79,14 +83,14 @@ class Element(ABC):
     def _u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         pass
 
-    def u_ext(self, input_pos: VectorLike, output_pos: VectorLike) -> Matrix:
+    def u_extract(self, input_pos: VectorLike, output_pos: VectorLike) -> Matrix:
         # TODO: Quantization of floating-point positions could help avoid cache misses
         input_pos_arr = np.array(input_pos)
         output_pos_arr = np.array(output_pos)
         signature = input_pos_arr.tobytes() + output_pos_arr.tobytes()
         # Try to hit the cache
-        if signature in self._u_ext_cache:
-            return self._u_ext_cache[signature]
+        if signature in self._u_extract_cache:
+            return self._u_extract_cache[signature]
 
         # The vector FROM the auxiliary input TO the output
         r_io = np.array(output_pos) - np.array(input_pos)
@@ -96,14 +100,14 @@ class Element(ABC):
             [np.zeros((3, 3)), np.identity(3)]
         ])
 
-        u_ext_extend = np.block([
+        u_extract_extend = np.block([
             [np.zeros((6, 13))],
             [np.zeros((6, 6)), transform, np.zeros((6, 1))],
             [np.zeros((1, 13))],
         ])
 
-        self._u_ext_cache[signature] = u_ext_extend
-        return u_ext_extend
+        self._u_extract_cache[signature] = u_extract_extend
+        return u_extract_extend
 
     def h(self, ref_pos: VectorLike, input_pos: VectorLike) -> Matrix:
         """
@@ -159,6 +163,71 @@ class Element(ABC):
             'torque': np.array(torque),
             'point': np.array(point),  # Point is needed for the sweep evaluation of continuous elements
         })
+
+
+class DiscreteElement(ABC, Element):
+    """
+    Base class for discrete elements, mostly rigid bodies
+    """
+    def __init__(self, e_id: EntityID):
+        super().__init__(e_id)
+
+    def modal_mass(self, input_pos: VectorLike, com_pos: VectorLike, omega: float, local_input_state: Vector) -> float:
+        # First, we need the state at the COM of the rigid body
+        u_com = self.u(input_pos, com_pos, omega)
+        state_vector = u_com @ local_input_state
+        # Extract the 6x1 kinematic portion (displacements and rotations)
+        v = state_vector[0:6].reshape(6, 1)
+        # Generalized matrix multiplication
+        return float(v.T @ self._m_param_mat @ v)
+
+    @property
+    @abstractmethod
+    def _m_param_mat(self) -> Matrix:
+        """Returns the 6x6 spatial mass/inertia matrix."""
+        pass
+
+
+class ContinuousElement(ABC, Element):
+    """
+    Base class for continuous elements, mostly flexible bodies
+    """
+    def __init__(self, e_id: EntityID):
+        super().__init__(e_id)
+
+    def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
+                   local_input_state: np.ndarray) -> float:
+        beam_len = np.linalg.norm(np.array(output_pos) - np.array(input_pos))
+
+        def mass_integrand(x: float) -> float:
+            direction = (np.array(output_pos) - np.array(input_pos)) / beam_len
+            current_pos = np.array(input_pos) + direction * x
+
+            # Propagate from the LOCAL input to the intermediate point x
+            u_x = self.u(input_pos, current_pos, omega)
+            state_at_x = u_x @ local_input_state
+
+            # Extract the 6x1 kinematic vector
+            v = state_at_x[0:6].reshape(6, 1)
+
+            return float(v.T @ self._M_bar_param @ v)
+
+        element_modal_mass, _ = integrate.quad(mass_integrand, 0, beam_len)
+        return element_modal_mass
+
+    @property
+    @abstractmethod
+    def _m_bar_param_mat(self) -> Matrix:
+        """Returns the 6x6 mass/inertia distribution matrix per unit length."""
+        pass
+
+
+class MasslessMixin:
+    @property
+    def _m_param_mat(self) -> Matrix:
+        return np.zeros((6, 6))
+
+    _m_bar_param_mat: Matrix = _m_param_mat
 
 
 @dataclass
