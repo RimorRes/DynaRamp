@@ -4,7 +4,7 @@ import dynaramp.mstmm as dyn
 
 
 def create_mass_spring_oscillator():
-    system = dyn.MBS()
+    system = dyn.System()
 
     m1 = 5
     s = 1
@@ -56,7 +56,7 @@ def create_mass_spring_oscillator():
 
 
 def create_parallel_mass_spring_oscillator(n):
-    system = dyn.MBS()
+    system = dyn.System()
 
     m = 5
     s = 1
@@ -99,7 +99,7 @@ def create_parallel_mass_spring_oscillator(n):
 
 
 def create_simple_multi_output_system():
-    system = dyn.MBS()
+    system = dyn.System()
 
     m = 5
     s = 1
@@ -149,7 +149,7 @@ def create_simple_multi_output_system():
 
 
 def create_simple_closed_loop_system(auto_cut: bool = False):
-    system = dyn.MBS()
+    system = dyn.System()
 
     # Masses
     m = 2
@@ -206,7 +206,7 @@ def create_simple_closed_loop_system(auto_cut: bool = False):
 
 
 def create_static_loading():
-    system = dyn.MBS()
+    system = dyn.System()
 
     m = 5
     s = 1

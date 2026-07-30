@@ -3,6 +3,7 @@ import logging
 
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Dict
 
 import numpy as np
@@ -18,12 +19,19 @@ logger = logging.getLogger(__name__)
 NULL_SV = np.r_[np.full(12, None), 1]
 NULL_SV.setflags(write=False)
 
+class PortType(Enum):
+    INPUT = 1
+    OUTPUT = 2
+
+# Aliases
+
 type ElemLike = EntityID | Element
 
 # TODO: QoL: make sure copy/deepcopy work as intended
 # TODO: Constructor using geometry primitives
 # TODO: Add support for rotations
 
+# Data Structures
 
 class Element(ABC):
 

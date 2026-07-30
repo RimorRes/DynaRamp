@@ -4,7 +4,7 @@ import dynaramp.mstmm as dyn
 
 
 def create_cantilever_beam():
-    system = dyn.MBS()
+    system = dyn.System()
 
     length = 10
     h = 1

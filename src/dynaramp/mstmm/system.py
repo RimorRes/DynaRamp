@@ -1,501 +1,27 @@
 from __future__ import annotations
 import logging
 
-from typing import Tuple, List, Dict, Iterable, Sequence
+from typing import Tuple, List, Dict, Sequence
 from collections import deque, defaultdict
 
-import networkx as nx
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.optimize import minimize_scalar
 
-from common.types import EntityID, is_entity_id, Vector, VectorLike, Matrix
-from .structs import NULL_SV, Element, ElemLike, Boundary, CutPoint
+from common.types import EntityID, Vector, VectorLike, Matrix
+from .topology import TopologyHandler
 
 logger = logging.getLogger(__name__)
 
 # TODO: better error raising, custom exceptions?
 # TODO: Clean up z_rem, z_red, rem_boundaries clutter for state propagation
 # TODO: Add rich results classes
-# TODO: PRIORITY: separate MBS class into topology handler and computation
 
 
-class MBS:
+class System:
 
-    def __init__(self):
-        self._elements: Dict[EntityID, Element] = {}
-        self._elem_port_pos: Dict[EntityID, List[VectorLike]] = {}
-        self._elem_port_type: Dict[EntityID, List[str]] = {}
-        self._elem_main_port: Dict[EntityID, int] = {}
-
-        self._root: Boundary | None = None
-        self._tips: Dict[EntityID, Boundary] = {}
-        self._cut_points: List[CutPoint] = []
-
-        self._z_all = np.array([], dtype=np.float64)  # Overall state vector (concatenated boundary vectors)
-
-        self._internal_graph: nx.DiGraph = nx.DiGraph()
-        self._user_graph: nx.DiGraph = nx.DiGraph()  # Graph entirely defined by user, for visualization and analysis
-
-        # For internal use only! Will not have any public-facing attribute.
-        self._z_all_cache_invalid = True  # Flag to indicate if the overall state vector needs to be recomputed
-        self._tree_generated = False
-        self._elem_output_info = {}
-        self._upstream_tips = {}
-
-    # Read-only attributes
-    @property
-    def elements(self) -> Dict[EntityID, Element]:
-        # Return a copy to avoid accidental mutation of internal state
-        return self._elements.copy()
-
-    @property
-    def graph(self) -> nx.DiGraph[EntityID]:
-        if self._tree_generated:
-            return self._user_graph.copy(as_view=True)
-        else:
-            return self._internal_graph.copy(as_view=True)
-
-    @property
-    def tree(self):
-        if self._tree_generated:
-            return self._internal_graph.copy(as_view=True)
-        else:
-            err_msg = "Tree not generated."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-    @property
-    def root(self) -> Boundary:
-        if self._root is None:
-            err_msg = "Root element not identified."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-        else:
-            return self._root
-
-    @property
-    def tips(self) -> Dict[EntityID, Boundary]:
-        # Return a copy to avoid accidental mutation of internal state
-        return self._tips.copy()
-
-    @property
-    def boundaries(self) -> List[EntityID]:
-        # Sort the boundaries -> [root, tip1, tip2, ...]
-        # Purposefully not cached. Every call generates a new list to avoid accidental mutations/side effects.
-        # Avoid calling `self.root` here because the property logs and raises; check internal `_root` directly.
-        if self._root is None:
-            logger.warning("Root boundary not defined. Returning only tip boundaries.")
-            bound = [t_id for t_id in self._tips]
-        else:
-            bound = [self._root.b_id] + [t_id for t_id in self._tips]
-        return bound
-
-    @property
-    def z_all(self) -> Vector:
-        # Should only be called once all boundaries are defined (especially root as this would otherwise throw an error)
-        if self._z_all_cache_invalid:  # Recompute cached value as needed
-            z = np.hstack([self.root.state_vector] + [b.state_vector for b in self._tips.values()])
-            z.setflags(write=False)  # Make the aray read-only
-            self._z_all = z
-            self._z_all_cache_invalid = False
-        return self._z_all
-
-    @staticmethod
-    def _resolve_elem_id(elem_or_eid: ElemLike) -> EntityID:
-        # Accept raw IDs directly but prefer an object's explicit `e_id` attribute.
-        if hasattr(elem_or_eid, "e_id"):
-            e_id_attr = elem_or_eid.e_id
-            if is_entity_id(e_id_attr):
-                return e_id_attr
-            err_msg = f"Unsupported type {type(e_id_attr).__name__} for the provided element's `e_id`."
-            logger.error(err_msg)
-            raise TypeError(err_msg)
-
-        if is_entity_id(elem_or_eid):
-            return elem_or_eid
-
-        err_msg = (
-            f"Expected an entity ID or Element-like object with an `e_id` attribute. "
-            f"Got {type(elem_or_eid).__name__}."
-        )
-        logger.error(err_msg)
-        raise TypeError(err_msg)
-
-    def _has_port_capacity(self, elem: Element) -> Tuple[bool, bool]:
-        """
-        Checks remaining capacity for input and output ports.
-        Return whether the element can accept additional input and output connections.
-        :param elem:
-        :return: A tuple `(can_add_input, can_add_output)`
-        """
-        eid = self._resolve_elem_id(elem)
-
-        ports = self._elem_port_type[eid]
-
-        input_count = ports.count('input')
-        output_count = ports.count('output')
-
-        return input_count < elem.MAX_INPUTS, output_count < elem.MAX_OUTPUTS
-
-    def add_elements(self, elems: Element | Iterable[Element]) -> MBS:
-        if isinstance(elems, Iterable):
-            elem_iterable = elems
-        else:
-            elem_iterable = (elems,)
-
-        for elem in elem_iterable:
-            # Strictly typed interface. Check that the element is an instance of Element or its subclasses
-            if not isinstance(elem, Element):
-                err_msg = (f"Provided element must be an instance of Element or its subclasses. "
-                           f"Got {type(elem).__name__}.")
-                logger.error(err_msg)
-                raise TypeError(err_msg)
-
-            self._elements[elem.e_id] = elem
-            self._internal_graph.add_node(elem.e_id)
-            # Initializing port entries for the new element
-            self._elem_port_pos[elem.e_id] = []
-            self._elem_port_type[elem.e_id] = []
-
-            logger.debug("Adding element %r to the system.", elem.e_id)
-
-        return self
-
-    def add_root(self, target_elem: ElemLike, boundary_sv: VectorLike, output_pos: VectorLike | None = None,
-                 output_port: int | None = None) -> EntityID:
-
-        if output_pos is None and output_port is None:
-            err_msg = "Either output_pos or output_port must be provided to add a root."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-        elif output_pos is not None and output_port is not None:
-            err_msg = "Only one of output_pos or output_port can be provided to add a root."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        # NO PORT OVERWRITE PROTECTION
-        if self._root is not None:
-            err_msg = f"Root boundary is already defined as [{self._root.b_id}]."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        tgt_id = self._resolve_elem_id(target_elem)
-        if tgt_id not in self._elements:
-            err_msg = f"Cannot add root: target element [{tgt_id}] is missing from the system."
-            logger.error(err_msg)
-            raise KeyError(err_msg)
-
-        # Create a new port if needed, otherwise use the provided port index
-        port_idx = None
-        if output_pos is not None:
-            # Check if the target can accept an additional output
-            if not self._has_port_capacity(self._elements[tgt_id])[1]:
-                err_msg = f"Cannot add root: target element [{tgt_id}] has reached its maximum output capacity."
-                logger.error(err_msg)
-                raise ValueError(err_msg)
-
-            port_idx = len(self._elem_port_pos[tgt_id])
-            self._elem_port_pos[tgt_id].append(output_pos)
-            self._elem_port_type[tgt_id].append('output')
-
-        elif output_port is not None:
-            port_idx = output_port
-            self._elem_port_type[tgt_id][port_idx] = 'output'
-
-        # Create the root
-        root_boundary = Boundary(b_id=f"{tgt_id}.{port_idx}_root", state_vector=boundary_sv)
-        # Cache the new root
-        self._root = root_boundary
-        self._z_all_cache_invalid = True
-        # Add it to the graph
-        self._internal_graph.add_node(root_boundary.b_id)
-        self._internal_graph.add_edge(tgt_id, root_boundary.b_id, output_port=port_idx)
-
-        logger.debug(f"Added [{root_boundary.b_id}] as the root boundary to element [{tgt_id}] at port [{port_idx}].")
-
-        return root_boundary.b_id
-
-    def add_tip(self, target_element: ElemLike, boundary_sv: VectorLike, input_pos: VectorLike | None = None,
-                input_port: int | None = None) -> EntityID:
-
-        if input_pos is None and input_port is None:
-            err_msg = "Either input_pos or input_port must be provided to add a tip."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-        elif input_pos is not None and input_port is not None:
-            err_msg = "Only one of input_pos or input_port can be provided to add a tip."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        # NO PORT OVERWRITE PROTECTION
-        tgt_id = self._resolve_elem_id(target_element)
-        if tgt_id not in self._elements:
-            err_msg = f"Cannot add tip: target element [{tgt_id}] is missing from the system."
-            logger.error(err_msg)
-            raise KeyError(err_msg)
-
-        # Create a new port if needed, otherwise use the provided port index
-        port_idx = None
-
-        if input_pos is not None:
-            # Check if the target can accept an additional input
-            if not self._has_port_capacity(self._elements[tgt_id])[0]:
-                err_msg = f"Cannot add tip: target element [{tgt_id}] has reached its maximum input capacity."
-                logger.error(err_msg)
-                raise ValueError(err_msg)
-
-            port_idx = len(self._elem_port_pos[tgt_id])
-            self._elem_port_pos[tgt_id].append(input_pos)
-            self._elem_port_type[tgt_id].append('input')
-            # Set port as main input if needed
-            if tgt_id not in self._elem_main_port:
-                self._elem_main_port[tgt_id] = port_idx
-
-        elif input_port is not None:
-            port_idx = input_port
-            self._elem_port_type[tgt_id][port_idx] = 'input'
-
-        # Create the tip boundary
-        tip_boundary = Boundary(b_id=f"tip_{tgt_id}.{port_idx}", state_vector=boundary_sv)
-        # Cache the new tip boundary
-        self._tips[tip_boundary.b_id] = tip_boundary
-        self._z_all_cache_invalid = True
-        # Add to graph
-        self._internal_graph.add_node(tip_boundary.b_id)
-        self._internal_graph.add_edge(tip_boundary.b_id, tgt_id, input_port=port_idx)
-
-        logger.debug(f"Added [{tip_boundary.b_id}] as a tip boundary to element [{tgt_id}] at port [{port_idx}].")
-
-        return tip_boundary.b_id
-
-    def connect_elements(self, src: ElemLike, dst: ElemLike, src_pos: VectorLike, dst_pos: VectorLike) -> MBS:
-
-        src_id = self._resolve_elem_id(src)
-        dst_id = self._resolve_elem_id(dst)
-        log_prefix = f"[{src_id}] -> [{dst_id}]:"
-
-        # Prevent creating an invalid link referencing non-existent elements
-        if src_id not in self._elements or dst_id not in self._elements:
-            err_msg = f"{log_prefix} element(s) missing from the system."
-            logger.error(err_msg)
-            raise KeyError(err_msg)
-
-        # Prevent self-loops
-        if src_id == dst_id:
-            logger.warning(f"{log_prefix} would create a self-loop.")
-            return self
-
-        # Check if the directed edge already exists (regardless of slot)
-        if (src_id, dst_id) in self._internal_graph.edges:
-            logger.warning(f"{log_prefix} parallel edges between the same elements are not allowed.")
-            return self
-
-        # Check if the src (resp. dst) can accept an additional output (resp. input).
-        if not self._has_port_capacity(self._elements[src_id])[1]:
-            err_msg = f"{log_prefix} source element [{src_id}] has reached its maximum output capacity."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-        if not self._has_port_capacity(self._elements[dst_id])[0]:
-            err_msg = f"{log_prefix} destination element [{dst_id}] has reached its maximum input capacity."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        # After pre-checks are run, the elements can be linked
-        # Creating ports
-        out_port_idx = len(self._elem_port_pos[src_id])
-        in_port_idx = len(self._elem_port_pos[dst_id])
-        self._elem_port_pos[src_id].append(src_pos)
-        self._elem_port_type[src_id].append('output')
-        self._elem_port_pos[dst_id].append(dst_pos)
-        self._elem_port_type[dst_id].append('input')
-        # Set port as main input if needed
-        if dst_id not in self._elem_main_port:
-            self._elem_main_port[dst_id] = in_port_idx
-        # Linking
-        logger.debug(f"{log_prefix} linking from source port [{src_id}.{out_port_idx}] "
-                     f"to destination port [{dst_id}.{in_port_idx}].")
-        self._internal_graph.add_edge(src_id, dst_id, output_port=out_port_idx, input_port=in_port_idx)
-
-        return self
-
-    def cut_connection(self, connection: Iterable[ElemLike]) -> MBS:
-        """
-        "Cutting the hinge" i.e., generating virtual tips to account for multi-output or looping elements
-        :param connection:
-        :return:
-        """
-
-        src_id, dst_id = map(self._resolve_elem_id, connection)
-        log_prefix = f"Cutting [{src_id}] -/> [{dst_id}]:"
-
-        try:
-            src_port_idx = self._internal_graph[src_id][dst_id]['output_port']
-            dst_port_idx = self._internal_graph[src_id][dst_id]['input_port']
-        except KeyError:
-            err_msg = f"{log_prefix} specified connection does not exist in the system."
-            logger.error(err_msg)
-            raise KeyError(err_msg)
-
-        if src_id in self.boundaries or dst_id in self.boundaries:
-            err_msg = f"{log_prefix} cannot cut a connection with a tip boundary."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        if self._internal_graph.out_degree(src_id) == 1:
-            # Check if node is in a directed cycle
-            in_cycle = False
-            for scc in nx.strongly_connected_components(self._internal_graph):
-                if src_id in scc and len(scc) > 1:
-                    in_cycle = True
-            if in_cycle:
-                try:
-                    # It would be mathematically equivalent to have root in b_id2,
-                    # but it makes more sense to conserve the root during reduction
-                    b_id1 = self.add_root(self._elements[src_id], NULL_SV, output_port=src_port_idx)
-                    b_id2 = self.add_tip(self._elements[dst_id], NULL_SV, input_port=dst_port_idx)
-                    # Cutting a connection in this case generates a new virtual INPUT/OUTPUT pair.
-                    # No C sign matrix will be needed. Both state vectors are equal
-                    cut = CutPoint(b_id1, b_id2, False)
-                    logger.info(f"{log_prefix} cut closed loop")
-                    logger.debug(f"Created new root [{b_id1}] and tip [{b_id2}].")
-                except ValueError as exc:
-                    err_msg = f"{log_prefix} failed to cut the connection. Could not create new root."
-                    logger.error(err_msg)
-                    raise ValueError(err_msg) from exc
-            else:
-                err_msg = (f"{log_prefix} source element [{src_id}] has only one output. Cutting this connection "
-                           f"would isolate the downstream elements.")
-                logger.error(err_msg)
-                raise ValueError(err_msg)
-
-        else:
-            b_id1 = self.add_tip(self._elements[src_id], NULL_SV, input_port=src_port_idx)
-            b_id2 = self.add_tip(self._elements[dst_id], NULL_SV, input_port=dst_port_idx)
-            # Cutting a connection in this case generates two new virtual INPUT tips/boundaries.
-            # C sign matrix will be needed
-            cut = CutPoint(b_id1, b_id2)
-            logger.info(f"{log_prefix} cut connection.")
-            logger.debug(f"Created new tips [{b_id1}] and [{b_id2}].")
-
-        # clean up the old edge and save the cutting point relation
-        self._cut_points.append(cut)
-        self._internal_graph.remove_edge(src_id, dst_id)
-        logger.debug(f"{log_prefix} old edge removed.")
-
-        return self
-
-    def find_cuts(self) -> List[Tuple[EntityID, EntityID]]:
-        # Identify which connections between elements need to be removed to get a tree system
-        # At this step a valid and unique root must be selected
-
-        connections_to_cut = []
-        # Handle diverging nodes (out_degree > 1)
-        diverging_nodes = [n for n in self._internal_graph if self._internal_graph.out_degree(n) > 1]
-        for dnode in diverging_nodes:
-            succs = iter(self._internal_graph[dnode])
-            # Each element can only have one output
-            # We can choose to only keep the output with the shortest path to root
-            preserved = nx.shortest_path(self._internal_graph, source=dnode, target=self.root.b_id)[1]
-            for n in succs:
-                if n != preserved:
-                    connections_to_cut.append((dnode, n))
-        # Handle the special closed loop case
-        # Collect strongly connected components, in our case this is analogous to directed cycles
-        cycles = nx.strongly_connected_components(self._internal_graph)
-        root_cyc = None
-        for cyc in cycles:
-            if len(cyc) > 1:
-                if all([self._internal_graph.out_degree(node) == 1 for node in cyc]):
-                    root_cyc = cyc
-                    break
-        if root_cyc:
-            # We now need to choose where to cut
-            # We can try cutting at anentry point of the loop
-            for node in root_cyc:
-                if self._internal_graph.in_degree(node) > 1:
-                    pred_in_cycle = next(x for x in self._internal_graph.predecessors(node) if x in root_cyc)
-                    connections_to_cut.append((pred_in_cycle, node))
-                    break
-            # If this fails, we can just cut anywhere
-            node = root_cyc.pop()
-            root_cyc.add(node)
-            pred_in_cycle = next(x for x in self._internal_graph.predecessors(node) if x in root_cyc)
-            logger.debug((pred_in_cycle, node))
-            connections_to_cut.append((pred_in_cycle, node))
-
-        # Return edges to be cut
-        logger.info(f"Found {len(connections_to_cut)} cuts to be made.")
-        for i, (src, dst) in enumerate(connections_to_cut):
-            logger.debug(f"Cut {i}: {src}->{dst}")
-
-        return connections_to_cut
-
-    def make_tree(self) -> MBS:
-        logger.info("Transforming system into a tree structure.")
-        self._user_graph = self._internal_graph.copy()
-
-        logger.debug(f"Auto resolving edges to cut.")
-        c2c = self.find_cuts()  # Connections to cut
-        for connection in c2c:
-            self.cut_connection(connection)
-
-        # Check that we have a correct tree system
-        # The actual check needs to be run on a reversed view of the graph since the root is the sink, not the source.
-        # is_arborescence allows for an in_degree <= 1,
-        # but with the current algorithm any element node with in_degree == 0 would be disconnected
-        # (only tips can verify this condition and be connected as they are not internal nodes);
-        # ergo this effectively validates the tree structure where every element has exactly one ouput.
-        if not nx.is_arborescence(nx.reverse_view(self._internal_graph)):
-            err_msg = f"Invalid topology. Could not transform system into a tree."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        logger.debug(f"Validated topology.")
-
-        # Buffer the output port of all element/boundary nodes to speed up the transfer matrix calculations
-        for e in self._elements:
-            successor = next(self._internal_graph.successors(e))  # Element linked to e's output
-            out_port_pos = next(  # Position of e's output
-                port_pos
-                for port_pos, port_type in zip(self._elem_port_pos[e], self._elem_port_type[e])
-                if port_type == 'output'
-            )
-            self._elem_output_info[e] = {'output_pos': out_port_pos, 'next': successor}
-        # Same operation on the tips (we exclude the root as it has no output)
-        for t_id in self._tips:
-            successor = next(self._internal_graph.successors(t_id))
-            self._elem_output_info[t_id] = {'output_pos': None, 'next': successor}
-
-        # Next, we buffer what elements have what upstream tips. We don't want to keep testing unreachable elements.
-        for e in self._elements:
-            ancestors = nx.ancestors(self._internal_graph, e)
-            self._upstream_tips[e] = [n for n in ancestors if n in self._tips]
-
-        logger.info("Successfully built valid tree system.")
-        self._tree_generated = True
-
-        return self
-
-    def resolve_branch_up_to(self, src: EntityID, tgt: EntityID) -> List[EntityID]:
-        """
-        Return path from src to tgt (excluding tgt)
-        :param src:
-        :param tgt:
-        :return:
-        """
-        path = []
-        node = src
-        while node != tgt:
-            path.append(node)
-            try:
-                node = self._elem_output_info[node]['next']
-            except KeyError:
-                err_msg = f"No path found from [{src}] to [{tgt}]."
-                logger.warning(err_msg)
-                raise ValueError(err_msg)
-
-        return path
+    def __init__(self, system_topo: TopologyHandler):
+        self.topology = system_topo
 
     def transfer_mat_along_path(self, path: Sequence[EntityID], omega: float) -> Matrix:
         # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
@@ -503,17 +29,17 @@ class MBS:
 
         for i in range(len(path) - 1):
             e1, e2 = path[i], path[i + 1]
-
-            e2_elem = self._elements[e2]  # Because of the way we use the path, e2 can never be a boundary (root here)
-            e2_input_port_idx: int = self.tree[e1][e2]['input_port']
+            # Because of the way we use the path, e2 can never be a boundary (root here)
+            e2_info = self.topology.get_element_info(e2)
+            e2_input_port_idx: int = self.topology.tree[e1][e2]['input_port']
             # Retrieve the port positions
-            e2_in_pos: VectorLike = self._elem_port_pos[e2][e2_input_port_idx]
-            e2_out_pos: VectorLike = self._elem_output_info[e2]['output_pos']
+            e2_in_pos: VectorLike = e2_info.input_ports[e2_input_port_idx].pos
+            e2_out_pos: VectorLike = e2_info.output_port.pos
             # Here we apply the transfer matrix for the element e2 based on its input and output ports
-            if e2_input_port_idx == self._elem_main_port[e2]:
-                u_chain = e2_elem.u(e2_in_pos, e2_out_pos, omega) @ u_chain
+            if e2_input_port_idx == e2_info.main_input_idx:
+                u_chain = e2_info.obj.u(e2_in_pos, e2_out_pos, omega) @ u_chain
             else:
-                u_chain = e2_elem.u_extract(e2_in_pos, e2_out_pos) @ u_chain
+                u_chain = e2_info.obj.u_extract(e2_in_pos, e2_out_pos) @ u_chain
 
         return u_chain
 
@@ -528,13 +54,14 @@ class MBS:
         :param omega:
         :return:
         """
-        multi_input_elems = [e_id for e_id in self._elements if self.tree.in_degree(e_id) > 1]
+        multi_input_elems = [e_id for e_id in self.topology.elements if self.topology.tree.in_degree(e_id) > 1]
         # Initialize dictionary columns for every boundary (guarantees Root gets zeros automatically)
         g_cols_dict = {b_id: [] for b_id in boundaries}
 
         for m_id in multi_input_elems:
+            m_info = self.topology.get_element_info(m_id)
             # Retrieve the N incoming branches
-            preds = list(self.tree.predecessors(m_id))
+            preds = list(self.topology.tree.predecessors(m_id))
             if len(preds) <= 1:
                 continue
 
@@ -542,20 +69,19 @@ class MBS:
             tips_by_branch = {p: [] for p in preds}
             k_mats = {}
 
-            for t_id in self._upstream_tips[m_id]:
-                path = self.resolve_branch_up_to(src=t_id, tgt=m_id)
+            for t_id in m_info.upstream_tips:
+                path = self.topology.resolve_branch_up_to(src=t_id, tgt=m_id)
                 branch_node = path[-1]
                 if branch_node in tips_by_branch:
                     tips_by_branch[branch_node].append(t_id)
 
                 # Extract the pure kinematics transformation matrix (no negative signs!)
                 u_chain = self.transfer_mat_along_path(path, omega)
-                input_port_idx: int = self.tree[branch_node][m_id]['input_port']
-                main_port_idx: int = self._elem_main_port[m_id]
-                input_port_pos: VectorLike = self._elem_port_pos[m_id][input_port_idx]
-                main_port_pos: VectorLike = self._elem_port_pos[m_id][main_port_idx]
+                input_port_idx: int = self.topology.tree[branch_node][m_id]['input_port']
+                input_port_pos: VectorLike = m_info.input_ports[input_port_idx].pos
+                main_port_pos: VectorLike = m_info.input_ports[m_info.main_input_idx].pos
 
-                k_mat = self._elements[m_id].h(ref_pos=main_port_pos, input_pos=input_port_pos) @ u_chain
+                k_mat = m_info.obj.h(ref_pos=main_port_pos, input_pos=input_port_pos) @ u_chain
 
                 k_mats[t_id] = k_mat
 
@@ -591,7 +117,7 @@ class MBS:
         reduced_t_mats = t_mats.copy()
         reduced_g_cols = g_cols.copy() if g_cols is not None else []
 
-        for cut in self._cut_points:
+        for cut in self.topology.cut_points:
             # Find the index of the cut's virtual boundaries.
             try:
                 idx1 = next(i for i, b_id in enumerate(reduced_boundaries) if b_id == cut.b_id1)
@@ -621,11 +147,11 @@ class MBS:
         :param omega:
         :return:
         """
-        remaining_boundaries = self.boundaries  # Tracks what boundary vectors are actually still in z_red
+        remaining_boundaries = self.topology.boundaries  # Tracks what boundary vectors are actually still in z_red
         # --- TRANSFER MATRIX COMPUTATION ---
         t_mats = [- np.identity(13)]  # init with root
-        for t_id in self._tips:
-            path = self.resolve_branch_up_to(src=t_id, tgt=self.root.b_id)
+        for t_id in self.topology.tips:
+            path = self.topology.resolve_branch_up_to(src=t_id, tgt=self.topology.root.b_id)
             t_mats.append(self.transfer_mat_along_path(path, omega))
 
         # --- GEOMETRIC MATRIX COMPUTATION ---
@@ -634,7 +160,7 @@ class MBS:
         # --- OVERALL MATRIX ASSEMBLY ---
         # Condense columns using the cut-point relations
         remaining_boundaries, z_rem, t_mats, g_cols = self._reduce_cut_points(
-            remaining_boundaries, self.z_all, t_mats, g_cols
+            remaining_boundaries, self.topology.z_all, t_mats, g_cols
         )
         # Assemble full-sized overall transfer matrix
         if g_cols:
@@ -682,11 +208,11 @@ class MBS:
         rem_boundaries = {rem_boundary_ids[i]: sv for i, sv in enumerate(z_red_full)}
         # Expand the reduced vector back to full size by reintroducing eliminated virtual boundaries
         eliminated_boundaries = {}
-        for c in self._cut_points:
+        for c in self.topology.cut_points:
             eliminated_boundaries[c.b_id2] = c.mat @ rem_boundaries[c.b_id1]
         # We need to build the final dict in the correct order
         bound_svs = {}
-        for b_id in self.boundaries:
+        for b_id in self.topology.boundaries:
             if b_id in rem_boundary_ids:
                 bound_svs[b_id] = rem_boundaries[b_id]
             else:
@@ -717,12 +243,12 @@ class MBS:
         logger.debug(f"Computing internal states at {omega:.3e} rad/s")
 
         boundary_svs = self.reconstruct_boundary_states(z_red, z_rem, rem_boundary_ids)
-        root_sv = boundary_svs.pop(self.root.b_id)
+        root_sv = boundary_svs.pop(self.topology.root.b_id)
         tip_svs = boundary_svs
 
         # Initialize search heads, traversal tracking, and state vectors for each element
-        search_heads = deque([t for t in self._tips])
-        searched = {k: False for k in self._elements}
+        search_heads = deque([t for t in self.topology.tips])
+        searched = {k: False for k in self.topology.elements}
         state_vecs = defaultdict(
             lambda: np.zeros(13),
             tip_svs
@@ -730,23 +256,26 @@ class MBS:
 
         while search_heads:
             head_id = search_heads.popleft()
-            next_id = self._elem_output_info[head_id]['next']
+            if head_id in self.topology.tips:
+                head_info = self.topology.get_tip_info(head_id)
+            else:
+                head_info = self.topology.get_element_info(head_id)
+            next_id = head_info.downstream
 
-            if next_id not in self._elements:
+            if next_id not in self.topology.elements:
                 # Also synonymous with the next node being the root
                 continue
             # Info about the next element
-            next_elem = self._elements[next_id]
+            next_elem_info = self.topology.get_element_info(next_id)
             # I/O for next_elem
-            next_input_port_idx: int = self.tree[head_id][next_id]['input_port']
-            next_main_port_idx = self._elem_main_port[next_id]
-            next_input_pos = self._elem_port_pos[next_id][next_input_port_idx]
-            next_output_pos = self._elem_output_info[next_id]['output_pos']
+            next_input_port_idx: int = self.topology.tree[head_id][next_id]['input_port']
+            next_input_pos = next_elem_info.input_ports[next_input_port_idx].pos
+            next_output_pos = next_elem_info.output_port.pos
             # Add to the output state vector of the next element
-            if next_input_port_idx == next_main_port_idx:
-                sv = next_elem.u(next_input_pos, next_output_pos, omega) @ state_vecs[head_id]
+            if next_input_port_idx == next_elem_info.main_input_idx:
+                sv = next_elem_info.obj.u(next_input_pos, next_output_pos, omega) @ state_vecs[head_id]
             else:
-                sv = next_elem.u_extract(next_input_pos, next_output_pos) @ state_vecs[head_id]
+                sv = next_elem_info.obj.u_extract(next_input_pos, next_output_pos) @ state_vecs[head_id]
             state_vecs[next_id] += sv
             # If the next element has already been used as a head, we don't need to add it again
             if not searched[next_id]:
@@ -763,7 +292,7 @@ class MBS:
             logger.debug(msg)
 
         # Verify that the propagated state vector satisfies the boundary conditions at the root
-        last_elem_id = next(self.tree.predecessors(self.root.b_id))
+        last_elem_id = next(self.topology.tree.predecessors(self.topology.root.b_id))
 
         rerr = np.linalg.norm(state_vecs[last_elem_id] - root_sv)/np.linalg.norm(root_sv)
         if rerr < rtol:
@@ -774,7 +303,7 @@ class MBS:
             raise ValueError(err_msg)
 
         # Add the root to the end of the dict
-        state_vecs[self.root.b_id] = root_sv
+        state_vecs[self.topology.root.b_id] = root_sv
 
         logger.info(f"Successfully computed internal states at {omega:.3e} rad/s.")
 
