@@ -105,43 +105,51 @@ class System:
 
         return g_cols
 
-    def _reduce_cut_points(
+    def _merge_columns(
             self,
             boundaries: List[EntityID],
             z_all: Vector,
             t_mats: List[Matrix],
             g_cols: List[Matrix] | None = None
     ) -> Tuple[List[EntityID], Vector, List[Matrix], List[Matrix]]:
-        reduced_boundaries = boundaries.copy()
-        reduced_z_all = z_all.copy()
-        reduced_t_mats = t_mats.copy()
-        reduced_g_cols = g_cols.copy() if g_cols is not None else []
+        """
+        Combine columns and boundary state vectors using the cutting point equation.
+        :param boundaries:
+        :param z_all:
+        :param t_mats:
+        :param g_cols:
+        :return:
+        """
+        merged_boundaries = boundaries.copy()
+        merged_z_all = z_all.copy()
+        merged_t_mats = t_mats.copy()
+        merged_g_cols = g_cols.copy() if g_cols is not None else []
 
         for cut in self.topology.cut_points:
             # Find the index of the cut's virtual boundaries.
             try:
-                idx1 = next(i for i, b_id in enumerate(reduced_boundaries) if b_id == cut.b_id1)
-                idx2 = next(i for i, b_id in enumerate(reduced_boundaries) if b_id == cut.b_id2)
+                idx1 = next(i for i, b_id in enumerate(merged_boundaries) if b_id == cut.b_id1)
+                idx2 = next(i for i, b_id in enumerate(merged_boundaries) if b_id == cut.b_id2)
             except StopIteration:
                 err_msg = f"Cut point boundaries [{cut.b_id1}] or [{cut.b_id2}] not found in tips."
                 logger.error(err_msg)
                 raise ValueError(err_msg)
 
-            reduced_t_mats[idx1] += reduced_t_mats[idx2] @ cut.mat
-            reduced_t_mats.pop(idx2)
+            merged_t_mats[idx1] += merged_t_mats[idx2] @ cut.mat
+            merged_t_mats.pop(idx2)
 
-            if reduced_g_cols:
-                reduced_g_cols[idx1] += reduced_g_cols[idx2] @ cut.mat
-                reduced_g_cols.pop(idx2)
+            if merged_g_cols:
+                merged_g_cols[idx1] += merged_g_cols[idx2] @ cut.mat
+                merged_g_cols.pop(idx2)
 
-            reduced_boundaries.pop(idx2)
-            mask = np.ones_like(reduced_z_all, dtype=np.bool)
+            merged_boundaries.pop(idx2)
+            mask = np.ones_like(merged_z_all, dtype=np.bool)
             mask[(13 * idx2):(13 * (idx2 + 1))] = False
-            reduced_z_all = reduced_z_all[mask]
+            merged_z_all = merged_z_all[mask]
 
-        return reduced_boundaries, reduced_z_all, reduced_t_mats, reduced_g_cols
+        return merged_boundaries, merged_z_all, merged_t_mats, merged_g_cols
 
-    def overall_transfer(self, omega) -> Tuple[Matrix, Vector, Vector, List[EntityID]]:
+    def overall_transfer_mat(self, omega) -> Tuple[Matrix, Vector, Vector, List[EntityID]]:
         """
 
         :param omega:
@@ -159,7 +167,7 @@ class System:
 
         # --- OVERALL MATRIX ASSEMBLY ---
         # Condense columns using the cut-point relations
-        remaining_boundaries, z_rem, t_mats, g_cols = self._reduce_cut_points(
+        remaining_boundaries, z_merged, t_mats, g_cols = self._merge_columns(
             remaining_boundaries, self.topology.z_all, t_mats, g_cols
         )
         # Assemble full-sized overall transfer matrix
@@ -172,14 +180,14 @@ class System:
             u_all = np.block(t_mats)
 
         # Handle known boundary conditions
-        known_mask = np.array([x is not None for x in z_rem])
-        nonzero_mask = np.array([x != 0 for x in z_rem]) & known_mask
+        known_mask = np.array([x is not None for x in z_merged])
+        nonzero_mask = np.array([x != 0 for x in z_merged]) & known_mask
         # Eliminate columns corresponding to known boundary conditions...
         u_red = u_all[:, ~ known_mask]
         # ... and move columns corresponding to known non-zero boundary conditions into a load vector
         u_nz = u_all[:, nonzero_mask]
-        z_nz = z_rem[nonzero_mask].astype(np.float64)
-        f = - u_nz @ z_nz
+        z_nz = z_merged[nonzero_mask].astype(np.float64)
+        f = - u_nz @ z_nz  # CAREFUL: the (-) is included here so we need to solve Uz=f, not Uz+f=0
         # Remove the trivial 13th row
         triv_mask = np.ones_like(f, dtype=bool)
         triv_mask[12] = False
@@ -191,14 +199,14 @@ class System:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        return u_red, f, z_rem, remaining_boundaries
+        return u_red, f, z_merged, remaining_boundaries
 
-    def reconstruct_boundary_states(self, z_red: Vector, z_rem: Vector,
+    def reconstruct_boundary_states(self, z_red: Vector, z_merged: Vector,
                                     rem_boundary_ids: List[EntityID]) -> Dict[EntityID, Vector]:
-        # Fill in the reduced overall state vector with the computed values
-        z_red_full = np.empty(z_rem.shape, dtype=np.float64)
+        # Fill in the merged overall state vector with the computed values from the reduced state vector
+        z_red_full = np.empty(z_merged.shape, dtype=np.float64)
         z_red_iter = iter(z_red)
-        for i, x in enumerate(z_rem):
+        for i, x in enumerate(z_merged):
             if x is None:
                 z_red_full[i] = next(z_red_iter)
             else:
@@ -224,7 +232,7 @@ class System:
             self,
             omega: float,
             z_red: Vector,
-            z_rem: Vector,
+            z_merged: Vector,
             rem_boundary_ids: List[EntityID],
             rtol: float = 1e-4
     ) -> Dict[EntityID, Vector]:
@@ -233,16 +241,16 @@ class System:
         (bodies and hinges) and up to the root.
         Verify that the propagated state vector satisfies the boundary conditions at the root.
         :param omega:
-        :param z_red:
-        :param z_rem:
-        :param rem_boundary_ids:
+        :param z_red: Vector you solve for in the reduced overall transfer equation
+        :param z_merged: Vector of remaining boundary conditions after merging cutting points
+        :param rem_boundary_ids: Indices of remaining boundary conditions
         :param rtol:
         :return:
         """
 
         logger.debug(f"Computing internal states at {omega:.3e} rad/s")
 
-        boundary_svs = self.reconstruct_boundary_states(z_red, z_rem, rem_boundary_ids)
+        boundary_svs = self.reconstruct_boundary_states(z_red, z_merged, rem_boundary_ids)
         root_sv = boundary_svs.pop(self.topology.root.b_id)
         tip_svs = boundary_svs
 
@@ -315,7 +323,7 @@ class System:
         :param omega:
         :return:
         """
-        u = self.overall_transfer(omega)[0]
+        u = self.overall_transfer_mat(omega)[0]
         return np.linalg.svd(u, compute_uv=False)[-1]
 
     def natural_modes(
@@ -347,7 +355,7 @@ class System:
                 method="bounded"
             )
             # Apply SVD to the transfer matrix at the refined frequency
-            u, _, z_rem, rem_bounds = self.overall_transfer(res.x)
+            u, _, z_rem, rem_bounds = self.overall_transfer_mat(res.x)
             _, s, vh = np.linalg.svd(u)
             # Reciprocal condition number
             rcond = s[-1] / s[0]
@@ -356,7 +364,11 @@ class System:
             logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
             # If rcond passes the tolerance, save the frequency and mode states
             if rcond < rtol:
-                all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_rem=z_rem,
+                # TODO: make homogenous solution cleaner
+                # FIX: Turn OFF external forcing and non-zero boundaries for homogenous mode shapes
+                z_rem_homogenous = np.array([i if i is None else 0.0 for i in z_rem])
+
+                all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_merged=z_rem_homogenous,
                                                       rem_boundary_ids=rem_bounds)  # or Vh[-1].T for the mode shape
                 modes.append((res.x, all_state_vecs))
 

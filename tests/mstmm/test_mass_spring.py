@@ -249,7 +249,7 @@ def test_mass_spring_oscillator():
     omega2 = np.sqrt(k / (2 * m1) * (2 + (m1 / m2) + np.sqrt(4 + (m1 / m2) ** 2)))
 
     oscillator = create_mass_spring_oscillator()
-    u, f, _, __ = oscillator.overall_transfer(omega1)
+    u, f, _, __ = oscillator.overall_transfer_mat(omega1)
     assert np.allclose(f, 0)
 
     modes = oscillator.natural_modes(2, omega_max=50)
@@ -268,7 +268,7 @@ def test_parallel_mass_spring_oscillator():
     omega_max = omega + 1
 
     oscillator = create_parallel_mass_spring_oscillator(n)
-    u, f, _, __ = oscillator.overall_transfer(omega)
+    u, f, _, __ = oscillator.overall_transfer_mat(omega)
     assert np.allclose(f, 0)
 
     w, _ = oscillator.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
@@ -319,7 +319,7 @@ def test_static_loading():
     m = 5
 
     system = create_static_loading()
-    u, f, z_rem, rem_bounds = system.overall_transfer(0)
+    u, f, z_rem, rem_bounds = system.overall_transfer_mat(0)
     z_red = solve(u, f)
 
     state_vecs = system.propagate_state(0, z_red, z_rem, rem_bounds)

@@ -41,7 +41,7 @@ def test_cantilever_beam():
     modes = cant_beam.natural_modes(7)
 
     for w, shape in modes:
-        u, f, z_rem, rem_bounds = cant_beam.overall_transfer(w)
+        u, f, z_rem, rem_bounds = cant_beam.overall_transfer_mat(w)
         assert np.allclose(f, 0)
 
         z_red = null_space(u, rcond=1e-8).reshape(12)

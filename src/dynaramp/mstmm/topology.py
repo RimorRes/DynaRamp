@@ -16,11 +16,6 @@ from .structs import NULL_SV, PortType, Element, ElemLike, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
 
-# TODO: better error raising, custom exceptions?
-# TODO: Clean up z_rem, z_red, rem_boundaries clutter for state propagation
-# TODO: Add rich results classes
-# TODO: PRIORITY: separate MBS class into topology handler and computation
-
 
 def requires_tree_generated(func):
     @wraps(func)

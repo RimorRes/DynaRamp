@@ -23,6 +23,10 @@ class PortType(Enum):
     INPUT = 1
     OUTPUT = 2
 
+class LoadType(Enum):
+    FORCE = 1
+    TORQUE = 2
+
 # Aliases
 
 type ElemLike = EntityID | Element
@@ -65,7 +69,7 @@ class Element(ABC):
         f_load_at_out = np.zeros(12)
 
         for load in self._applied_loads:
-            if load['type'] == 'force':
+            if load['type'] == LoadType.FORCE:
                 f = load['force']
                 p = load['point']
 
@@ -76,7 +80,7 @@ class Element(ABC):
                 # Add to the 12x1 load vector (indices 6:9 for moments, 9:12 for forces)
                 f_load_at_out[6:9] += m
                 f_load_at_out[9:12] += f
-            elif load['type'] == 'torque':
+            elif load['type'] == LoadType.TORQUE:
                 t = load['torque']
                 f_load_at_out[6:9] += t
 
@@ -154,7 +158,7 @@ class Element(ABC):
         :param point:
         """
         self._applied_loads.append({
-            'type': 'force',
+            'type': LoadType.FORCE,
             'force': np.array(force),
             'point': np.array(point)
         })
@@ -167,7 +171,7 @@ class Element(ABC):
         :return:
         """
         self._applied_loads.append({
-            'type': 'torque',
+            'type': LoadType.TORQUE,
             'torque': np.array(torque),
             'point': np.array(point),  # Point is needed for the sweep evaluation of continuous elements
         })
