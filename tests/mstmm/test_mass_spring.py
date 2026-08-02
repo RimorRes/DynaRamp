@@ -4,7 +4,7 @@ import dynaramp.mstmm as dyn
 
 
 def create_mass_spring_oscillator():
-    system = dyn.System()
+    topo = dyn.TopologyHandler()
 
     m1 = 5
     s = 1
@@ -38,25 +38,25 @@ def create_mass_spring_oscillator():
         k_rot=(np.inf, np.inf, np.inf)
     )
 
-    system.add_elements([spring_elem, mass_elem, spring_elem2, mass_elem2])
-    system.connect_elements(spring_elem, mass_elem, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
-    system.connect_elements(mass_elem, spring_elem2, src_pos=(0, 0, s), dst_pos=(0, 0, 0))
-    system.connect_elements(spring_elem2, mass_elem2, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
+    topo.add_elements([spring_elem, mass_elem, spring_elem2, mass_elem2])
+    topo.connect_elements(spring_elem, mass_elem, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
+    topo.connect_elements(mass_elem, spring_elem2, src_pos=(0, 0, s), dst_pos=(0, 0, 0))
+    topo.connect_elements(spring_elem2, mass_elem2, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
-    system.add_root(mass_elem2, root_boundary, output_pos=(0, 0, s))
-    system.add_tip(spring_elem, tip_boundary, input_pos=(0, 0, 0))
+    topo.add_root(mass_elem2, root_boundary, output_pos=(0, 0, s))
+    topo.add_tip(spring_elem, tip_boundary, input_pos=(0, 0, 0))
 
-    system.make_tree()
+    topo.make_tree()
 
-    return system
+    return dyn.System(topo)
 
 
 def create_parallel_mass_spring_oscillator(n):
-    system = dyn.System()
+    topo = dyn.TopologyHandler()
 
     m = 5
     s = 1
@@ -81,25 +81,25 @@ def create_parallel_mass_spring_oscillator(n):
         )
         spring_elems.append(i_spring)
 
-    system.add_elements(mass_elem)
+    topo.add_elements(mass_elem)
 
-    system.add_elements(spring_elems)
+    topo.add_elements(spring_elems)
     for spring in spring_elems:
-        system.connect_elements(spring, mass_elem, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
+        topo.connect_elements(spring, mass_elem, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
         tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
-        system.add_tip(spring, tip_boundary, (0, 0, 0))
+        topo.add_tip(spring, tip_boundary, (0, 0, 0))
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
-    system.add_root(mass_elem, root_boundary, output_pos=(0, 0, s))
+    topo.add_root(mass_elem, root_boundary, output_pos=(0, 0, s))
 
-    system.make_tree()
+    topo.make_tree()
 
-    return system
+    return dyn.System(topo)
 
 
 def create_simple_multi_output_system():
-    system = dyn.System()
+    topo = dyn.TopologyHandler()
 
     m = 5
     s = 1
@@ -131,25 +131,25 @@ def create_simple_multi_output_system():
         k_rot=(k_penalty, k_penalty, k_penalty)
     )
 
-    system.add_elements([mass_1, spring_2, spring_3, mass_4])
-    system.connect_elements(mass_1, spring_2, src_pos=(-s / 2, 0, s), dst_pos=(0, 0, 0))
-    system.connect_elements(mass_1, spring_3, src_pos=(s / 2, 0, s), dst_pos=(0, 0, 0))
-    system.connect_elements(spring_2, mass_4, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
-    system.connect_elements(spring_3, mass_4, src_pos=(0, 0, length), dst_pos=(s, 0, s),)
+    topo.add_elements([mass_1, spring_2, spring_3, mass_4])
+    topo.connect_elements(mass_1, spring_2, src_pos=(-s / 2, 0, s), dst_pos=(0, 0, 0))
+    topo.connect_elements(mass_1, spring_3, src_pos=(s / 2, 0, s), dst_pos=(0, 0, 0))
+    topo.connect_elements(spring_2, mass_4, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
+    topo.connect_elements(spring_3, mass_4, src_pos=(0, 0, length), dst_pos=(s, 0, s),)
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     tip_sv = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
     root_sv = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
 
-    system.add_root(mass_4, root_sv, output_pos=(s / 2, 0, s))
-    system.add_tip(mass_1, tip_sv, input_pos=(0, 0, 0))
+    topo.add_root(mass_4, root_sv, output_pos=(s / 2, 0, s))
+    topo.add_tip(mass_1, tip_sv, input_pos=(0, 0, 0))
 
-    system.make_tree()
+    topo.make_tree()
 
-    return system
+    return dyn.System(topo)
 
 
 def create_simple_closed_loop_system(auto_cut: bool = False):
-    system = dyn.System()
+    topo = dyn.TopologyHandler()
 
     # Masses
     m = 2
@@ -191,22 +191,22 @@ def create_simple_closed_loop_system(auto_cut: bool = False):
         k_rot=(k_penalty, k_penalty, k_penalty)
     )
 
-    system.add_elements((mass_1, spring_2, mass_3, spring_4))
-    system.connect_elements(mass_1, spring_2, src_pos=(0, 0, height), dst_pos=(0, 0, 0))
-    system.connect_elements(spring_2, mass_3, src_pos=(length, 0, 0), dst_pos=(0, 0, 0))
-    system.connect_elements(mass_3, spring_4, src_pos=(0, 0, -height), dst_pos=(0, 0, 0))
-    system.connect_elements(spring_4, mass_1, src_pos=(-length, 0, 0), dst_pos=(0, 0, 0))
+    topo.add_elements((mass_1, spring_2, mass_3, spring_4))
+    topo.connect_elements(mass_1, spring_2, src_pos=(0, 0, height), dst_pos=(0, 0, 0))
+    topo.connect_elements(spring_2, mass_3, src_pos=(length, 0, 0), dst_pos=(0, 0, 0))
+    topo.connect_elements(mass_3, spring_4, src_pos=(0, 0, -height), dst_pos=(0, 0, 0))
+    topo.connect_elements(spring_4, mass_1, src_pos=(-length, 0, 0), dst_pos=(0, 0, 0))
     if not auto_cut:
-        system.cut_connection((spring_4, mass_1))
+        topo.cut_connection((spring_4, mass_1))
 
     # No explicit tip boundaries
-    system.make_tree()
+    topo.make_tree()
 
-    return system
+    return dyn.System(topo)
 
 
 def create_static_loading():
-    system = dyn.System()
+    topo = dyn.TopologyHandler()
 
     m = 5
     s = 1
@@ -229,15 +229,15 @@ def create_static_loading():
 
     mass_1.apply_force(force=(0, 0, -9.81*m), point=(0, 0, s / 2))
 
-    system.add_elements([mass_1, spring_2])
-    system.connect_elements(mass_1, spring_2, src_pos=(0, 0, s), dst_pos=(0, 0, 0))
+    topo.add_elements([mass_1, spring_2])
+    topo.connect_elements(mass_1, spring_2, src_pos=(0, 0, s), dst_pos=(0, 0, 0))
 
-    system.add_root(spring_2, np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1]), output_pos=(0, 0, length))
-    system.add_tip(mass_1, np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1]), input_pos=(0, 0, 0))
+    topo.add_root(spring_2, np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1]), output_pos=(0, 0, length))
+    topo.add_tip(mass_1, np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1]), input_pos=(0, 0, 0))
 
-    system.make_tree()
+    topo.make_tree()
 
-    return system
+    return dyn.System(topo)
 
 
 def test_mass_spring_oscillator():
@@ -319,9 +319,9 @@ def test_static_loading():
     m = 5
 
     system = create_static_loading()
-    u, f, z_rem, rem_bounds = system.overall_transfer_mat(0)
+    u, f, z_rem, rem_bounds = system.overall_transfer_mat(0.0)
     z_red = solve(u, f)
 
-    state_vecs = system.propagate_state(0, z_red, z_rem, rem_bounds)
-    tip = next(iter(system.tips))
+    state_vecs = system.propagate_state(0.0, z_red, z_rem, rem_bounds)
+    tip = next(iter(system.topology.tips))
     assert np.isclose(state_vecs[tip][2], -9.81*m/k, rtol=1e-3)

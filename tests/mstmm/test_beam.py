@@ -4,7 +4,7 @@ import dynaramp.mstmm as dyn
 
 
 def create_cantilever_beam():
-    system = dyn.System()
+    topo = dyn.TopologyHandler()
 
     length = 10
     h = 1
@@ -22,16 +22,17 @@ def create_cantilever_beam():
         i_z=i_z
     )
 
-    system.add_elements(beam_elem)
+    topo.add_elements(beam_elem)
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
 
-    system.add_root(beam_elem, root_boundary, output_pos=(length, 0, 0))
-    system.add_tip(beam_elem, tip_boundary, input_pos=(0, 0, 0))
+    topo.add_root(beam_elem, root_boundary, output_pos=(length, 0, 0))
+    topo.add_tip(beam_elem, tip_boundary, input_pos=(0, 0, 0))
 
-    system.make_tree()
+    topo.make_tree()
+    system = dyn.System(topo)
 
     return system
 
@@ -41,11 +42,12 @@ def test_cantilever_beam():
     modes = cant_beam.natural_modes(7)
 
     for w, shape in modes:
-        u, f, z_rem, rem_bounds = cant_beam.overall_transfer_mat(w)
+        u, f, z_merged, rem_bounds = cant_beam.overall_transfer_mat(w)
         assert np.allclose(f, 0)
 
         z_red = null_space(u, rcond=1e-8).reshape(12)
+        z_merged_homogenous = np.array([i if i is None else 0.0 for i in z_merged])
 
-        bound_svs = cant_beam.reconstruct_boundary_states(z_red, z_rem, rem_bounds)
+        bound_svs = cant_beam.reconstruct_boundary_states(z_red, z_merged_homogenous, rem_bounds)
 
-        assert np.allclose(np.abs(bound_svs[cant_beam.root.b_id]), np.abs(shape[cant_beam.root.b_id]))
+        assert np.allclose(np.abs(bound_svs[cant_beam.topology.root.b_id]), np.abs(shape[cant_beam.topology.root.b_id]))

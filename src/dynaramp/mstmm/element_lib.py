@@ -6,8 +6,8 @@ from typing import Tuple
 import numpy as np
 
 from .structs import DiscreteElement, ContinuousElement, MasslessMixin
-from common.vecmath import skew_sym_mat
-from common.types import EntityID, Vector, VectorLike, Matrix
+from ..common.vecmath import skew_sym_mat
+from ..common.types import EntityID, Vector, VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +18,8 @@ class JunctionNode(MasslessMixin, DiscreteElement):
         super().__init__(e_id)
 
     @staticmethod
-    def _u(_=None, __=None, ___=None) -> Matrix:
-        return np.identity(13)
+    def _u(self, _=None, __=None, ___=None) -> Matrix:
+        return np.identity(13).astype(np.float64)
 
 
 class SpatialElasticHinge(MasslessMixin, DiscreteElement):
@@ -49,7 +49,7 @@ class SpatialElasticHinge(MasslessMixin, DiscreteElement):
         ])
 
     def _u(self, _, __, ___) -> Matrix:
-        return self._u_mat
+        return self._u_mat.astype(np.float64)
 
 
 class LumpedMass(DiscreteElement):
@@ -66,17 +66,17 @@ class LumpedMass(DiscreteElement):
     def _u(self, _, __, omega: float) -> Matrix:
         u_mat = np.identity(13)
         u_mat[9:12, 0:3] = self.mass * omega**2 * np.identity(3)
-        return u_mat
+        return u_mat.astype(np.float64)
 
     @property
     def _m_param_mat(self) -> Matrix:
-        return self._m_mat
+        return self._m_mat.astype(np.float64)
 
 
 class RigidBody(DiscreteElement):
-
-    MAX_INPUTS = -1
-    MAX_OUTPUTS = -1
+    # TODO: clean this bullshit up
+    MAX_INPUTS = np.iinfo(np.int32).max
+    MAX_OUTPUTS = np.iinfo(np.int32).max
 
     def __init__(
             self,
@@ -118,14 +118,14 @@ class RigidBody(DiscreteElement):
             [self.mass * (omega**2) * l_co, -(omega**2) * (self.mass * l_io @ l_ic + j), np.identity(3), l_io],
             [self.mass * (omega**2) * np.identity(3), -self.mass * (omega**2) * l_ic, np.zeros((3, 3)), np.identity(3)],
         ])
-        return u_mat
+        return u_mat.astype(np.float64)
 
     @property
     def _m_param_mat(self):
         return np.block([
             [self.mass * np.identity(3), np.zeros((3, 3))],
             [np.zeros((3, 3)), self.inertia]
-        ])
+        ]).astype(np.float64)
 
 
 class EulerBernoulliBeam(ContinuousElement):
@@ -211,8 +211,8 @@ class EulerBernoulliBeam(ContinuousElement):
         u_mat[10, 1] = self.e * self.iz * lam_y**3 * self._krylov_t(lam_y * x)
         u_mat[11, 2] = self.e * self.iy * lam_z**3 * self._krylov_t(lam_z * x)
 
-        return u_mat
+        return u_mat.astype(np.float64)
 
     @property
     def _m_bar_param_mat(self) -> Matrix:
-        return np.diag([self.mu, self.mu, self.mu, self.rho * self.jp, 0, 0])
+        return np.diag([self.mu, self.mu, self.mu, self.rho * self.jp, 0, 0]).astype(np.float64)

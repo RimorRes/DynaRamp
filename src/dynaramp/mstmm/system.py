@@ -8,7 +8,7 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.optimize import minimize_scalar
 
-from common.types import EntityID, Vector, VectorLike, Matrix
+from ..common.types import EntityID, Vector, Matrix
 from .topology import TopologyHandler
 
 logger = logging.getLogger(__name__)
@@ -23,9 +23,9 @@ class System:
     def __init__(self, system_topo: TopologyHandler):
         self.topology = system_topo
 
-    def transfer_mat_along_path(self, path: Sequence[EntityID], omega: float) -> Matrix:
+    def transfer_mat_along_path(self, path: Sequence[EntityID], omega: np.float64) -> Matrix:
         # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
-        u_chain = np.identity(13)
+        u_chain = np.identity(13, dtype=np.float64)
 
         for i in range(len(path) - 1):
             e1, e2 = path[i], path[i + 1]
@@ -33,20 +33,20 @@ class System:
             e2_info = self.topology.get_element_info(e2)
             e2_input_port_idx: int = self.topology.tree[e1][e2]['input_port']
             # Retrieve the port positions
-            e2_in_pos: VectorLike = e2_info.input_ports[e2_input_port_idx].pos
-            e2_out_pos: VectorLike = e2_info.output_port.pos
+            e2_in_pos: Vector = e2_info.ports[e2_input_port_idx].pos
+            e2_out_pos: Vector = e2_info.output_port.pos
             # Here we apply the transfer matrix for the element e2 based on its input and output ports
             if e2_input_port_idx == e2_info.main_input_idx:
                 u_chain = e2_info.obj.u(e2_in_pos, e2_out_pos, omega) @ u_chain
             else:
                 u_chain = e2_info.obj.u_extract(e2_in_pos, e2_out_pos) @ u_chain
 
-        return u_chain
+        return u_chain.astype(np.float64)
 
     def _get_geometric_constraints(
             self,
             boundaries: List[EntityID],
-            omega: float
+            omega: np.float64
     ) -> List[Matrix]:
         """
 
@@ -78,8 +78,8 @@ class System:
                 # Extract the pure kinematics transformation matrix (no negative signs!)
                 u_chain = self.transfer_mat_along_path(path, omega)
                 input_port_idx: int = self.topology.tree[branch_node][m_id]['input_port']
-                input_port_pos: VectorLike = m_info.input_ports[input_port_idx].pos
-                main_port_pos: VectorLike = m_info.input_ports[m_info.main_input_idx].pos
+                input_port_pos: Vector = m_info.ports[input_port_idx].pos
+                main_port_pos: Vector = m_info.ports[m_info.main_input_idx].pos
 
                 k_mat = m_info.obj.h(ref_pos=main_port_pos, input_pos=input_port_pos) @ u_chain
 
@@ -94,7 +94,7 @@ class System:
                     elif b_id in tips_by_branch[other_pred]:
                         g_cols_dict[b_id].append(-k_mats[b_id])
                     else:
-                        g_cols_dict[b_id].append(np.zeros((6, 13)))
+                        g_cols_dict[b_id].append(np.zeros((6, 13), dtype=np.float64))
 
         # Convert dictionary to ordered list of column blocks
         has_g_eqs = any(len(blocks) > 0 for blocks in g_cols_dict.values())
@@ -149,7 +149,7 @@ class System:
 
         return merged_boundaries, merged_z_all, merged_t_mats, merged_g_cols
 
-    def overall_transfer_mat(self, omega) -> Tuple[Matrix, Vector, Vector, List[EntityID]]:
+    def overall_transfer_mat(self, omega: np.float64) -> Tuple[Matrix, Vector, Vector, List[EntityID]]:
         """
 
         :param omega:
@@ -187,12 +187,12 @@ class System:
         # ... and move columns corresponding to known non-zero boundary conditions into a load vector
         u_nz = u_all[:, nonzero_mask]
         z_nz = z_merged[nonzero_mask].astype(np.float64)
-        f = - u_nz @ z_nz  # CAREFUL: the (-) is included here so we need to solve Uz=f, not Uz+f=0
+        f = - u_nz @ z_nz  # CAREFUL: the (-) is included here, so we need to solve Uz=f, not Uz+f=0
         # Remove the trivial 13th row
         triv_mask = np.ones_like(f, dtype=bool)
         triv_mask[12] = False
-        f = f[triv_mask]
-        u_red = u_red[triv_mask, :]
+        f = f[triv_mask].astype(np.float64)
+        u_red = u_red[triv_mask, :].astype(np.float64)
 
         if u_red.shape[0] != u_red.shape[1]:
             err_msg = "Invalid boundary conditions: The system is either under-constrained or over-constrained"
@@ -230,7 +230,7 @@ class System:
 
     def propagate_state(
             self,
-            omega: float,
+            omega: np.float64,
             z_red: Vector,
             z_merged: Vector,
             rem_boundary_ids: List[EntityID],
@@ -277,7 +277,7 @@ class System:
             next_elem_info = self.topology.get_element_info(next_id)
             # I/O for next_elem
             next_input_port_idx: int = self.topology.tree[head_id][next_id]['input_port']
-            next_input_pos = next_elem_info.input_ports[next_input_port_idx].pos
+            next_input_pos = next_elem_info.ports[next_input_port_idx].pos
             next_output_pos = next_elem_info.output_port.pos
             # Add to the output state vector of the next element
             if next_input_port_idx == next_elem_info.main_input_idx:
@@ -317,7 +317,7 @@ class System:
 
         return state_vecs
 
-    def _sigma_min(self, omega: float) -> float:
+    def _sigma_min(self, omega: np.float64) -> float:
         """
         Helper for retrieving the smallest singular value of an SVD of U_all(w).
         :param omega:
@@ -334,7 +334,7 @@ class System:
             rtol: float = 1e-5
     ) -> List[Tuple[float, Vector]]:
 
-        omega = np.linspace(omega_min, omega_max, search_res)
+        omega = np.linspace(omega_min, omega_max, search_res, dtype=np.float64)
         # Only retain strictly positive frequencies
         # We want to ignore rigid modes (and avoid dividing by zero) and negative frequencies
         omega = omega[omega > 0]
@@ -351,12 +351,16 @@ class System:
             # Minimize the singular values that approach zero
             res = minimize_scalar(
                 self._sigma_min,
-                bounds=(omega[idx - 1], omega[idx + 1]),
+                bounds=(float(omega[idx - 1]), float(omega[idx + 1])),
                 method="bounded"
             )
             # Apply SVD to the transfer matrix at the refined frequency
-            u, _, z_rem, rem_bounds = self.overall_transfer_mat(res.x)
+            u, _, z_merged, rem_bounds = self.overall_transfer_mat(res.x)
             _, s, vh = np.linalg.svd(u)
+            # TODO: make homogenous solution cleaner
+            # FIX: Turn OFF external forcing and non-zero boundaries for homogenous mode shapes
+            z_merged_homogenous = np.array([i if i is None else 0.0 for i in z_merged])
+
             # Reciprocal condition number
             rcond = s[-1] / s[0]
 
@@ -364,11 +368,7 @@ class System:
             logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
             # If rcond passes the tolerance, save the frequency and mode states
             if rcond < rtol:
-                # TODO: make homogenous solution cleaner
-                # FIX: Turn OFF external forcing and non-zero boundaries for homogenous mode shapes
-                z_rem_homogenous = np.array([i if i is None else 0.0 for i in z_rem])
-
-                all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_merged=z_rem_homogenous,
+                all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_merged=z_merged_homogenous,
                                                       rem_boundary_ids=rem_bounds)  # or Vh[-1].T for the mode shape
                 modes.append((res.x, all_state_vecs))
 

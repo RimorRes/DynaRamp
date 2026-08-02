@@ -11,7 +11,7 @@ import networkx as nx
 import numpy as np
 from pygments.styles import default
 
-from common.types import EntityID, is_entity_id, Vector, VectorLike
+from ..common.types import EntityID, is_entity_id, Vector, VectorLike
 from .structs import NULL_SV, PortType, Element, ElemLike, Boundary, CutPoint
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def requires_tree_generated(func):
 class ElementInfo:
     obj: Element
     main_input_idx: int
-    input_ports: List[PortInfo]
+    ports: List[PortInfo]
     output_port: PortInfo
     upstream_tips: List[EntityID]
     downstream: EntityID
@@ -47,7 +47,7 @@ class TipInfo:
 
 @dataclass(frozen=True)
 class PortInfo:
-    pos: VectorLike
+    pos: Vector
     ptype: PortType
 
 
@@ -55,7 +55,7 @@ class TopologyHandler:
 
     def __init__(self):
         self._elements: Dict[EntityID, Element] = {}
-        self._elem_port_pos: Dict[EntityID, List[VectorLike]] = {}
+        self._elem_port_pos: Dict[EntityID, List[Vector]] = {}
         self._elem_port_type: Dict[EntityID, List[PortType]] = {}
         self._elem_main_port: Dict[EntityID, int] = {}
 
@@ -68,7 +68,7 @@ class TopologyHandler:
         # This flag controls access to some attribs that would be nonsensical at this stage (e.g., z_all, etc.)
         self._tree_generated = False
         # Caches
-        self._z_all = np.array([], dtype=np.float64)  # Overall state vector (concatenated boundary vectors)
+        self._z_all = np.array([])  # Overall state vector (concatenated boundary vectors)
         self._einfo_cache: Dict[EntityID, ElementInfo] = {}
         self._tinfo_cache: Dict[EntityID, TipInfo] = {}
 
@@ -232,7 +232,7 @@ class TopologyHandler:
                 raise ValueError(err_msg)
 
             port_idx = len(self._elem_port_pos[tgt_id])
-            self._elem_port_pos[tgt_id].append(output_pos)
+            self._elem_port_pos[tgt_id].append(np.array(output_pos, dtype=np.float64))
             self._elem_port_type[tgt_id].append(PortType.OUTPUT)
 
         elif output_port is not None:
@@ -281,7 +281,7 @@ class TopologyHandler:
                 raise ValueError(err_msg)
 
             port_idx = len(self._elem_port_pos[tgt_id])
-            self._elem_port_pos[tgt_id].append(input_pos)
+            self._elem_port_pos[tgt_id].append(np.array(input_pos, dtype=np.float64))
             self._elem_port_type[tgt_id].append(PortType.INPUT)
             # Set port as main input if needed
             if tgt_id not in self._elem_main_port:
@@ -340,9 +340,9 @@ class TopologyHandler:
         # Creating ports
         out_port_idx = len(self._elem_port_pos[src_id])
         in_port_idx = len(self._elem_port_pos[dst_id])
-        self._elem_port_pos[src_id].append(src_pos)
+        self._elem_port_pos[src_id].append(np.array(src_pos, dtype=np.float64))
         self._elem_port_type[src_id].append(PortType.OUTPUT)
-        self._elem_port_pos[dst_id].append(dst_pos)
+        self._elem_port_pos[dst_id].append(np.array(dst_pos, dtype=np.float64))
         self._elem_port_type[dst_id].append(PortType.INPUT)
         # Set port as main input if needed
         if dst_id not in self._elem_main_port:
@@ -507,10 +507,11 @@ class TopologyHandler:
             obj = self._elements[e_id]
             main_input_idx = self._elem_main_port[e_id]
             # We create all PortInfo objects for the element
-            input_ports = []
+            ports = []
             output_port = None
             downstream = None
             for port_pos, ptype in zip(self._elem_port_pos[e_id], self._elem_port_type[e_id]):
+                pinfo = PortInfo(port_pos, ptype)
                 if ptype == PortType.OUTPUT:  # the output is treated and stored separately for easy access
                     # Sanity check for multiple outputs even though this situation shouldn't be possible
                     if output_port is not None:
@@ -519,9 +520,9 @@ class TopologyHandler:
                         raise RuntimeError(err_msg)
                     # Buffer the successor ID of all element/boundary nodes to speed up the transfer matrix calculations
                     downstream = next(self._internal_graph.successors(e_id), None)
-                    output_port = PortInfo(port_pos, ptype)
-                else:
-                    input_ports.append(PortInfo(port_pos, ptype))
+                    output_port = pinfo
+
+                ports.append(pinfo)
             # Another sanity check for proper definition. An error at this point would indicate state corruption
             if output_port is None:
                 err_msg = f"No output port found for element {e_id}."
@@ -536,7 +537,7 @@ class TopologyHandler:
             upstream_tips = [t for t in nx.ancestors(self._internal_graph, e_id) if t in self._tips]
 
             # Store the completed ElementInfo object
-            einfo = ElementInfo(obj, main_input_idx, input_ports, output_port, upstream_tips, downstream)
+            einfo = ElementInfo(obj, main_input_idx, ports, output_port, upstream_tips, downstream)
             self._einfo_cache[e_id] = einfo
 
         # (Re)gen TipInfo objects
