@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+from dataclasses import dataclass
 
 from typing import Tuple, List, Dict, Sequence
 from collections import deque, defaultdict
@@ -10,12 +11,19 @@ from scipy.optimize import minimize_scalar
 
 from ..common.types import EntityID, Vector, Matrix
 from .topology import TopologyHandler
+from .element_lib import RigidBody
 
 logger = logging.getLogger(__name__)
 
 # TODO: better error raising, custom exceptions?
 # TODO: Clean up z_rem, z_red, rem_boundaries clutter for state propagation
 # TODO: Add rich results classes
+
+
+@dataclass
+class Mode:
+    frequency: float
+    internal_states: Dict[EntityID, Vector]
 
 
 class System:
@@ -362,17 +370,61 @@ class System:
             # If rcond passes the tolerance, save the frequency and mode states
             if rcond < rtol:
                 all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_merged=z_merged_homogenous,
-                                                      rem_boundary_ids=rem_bounds)  # or Vh[-1].T for the mode shape
-                modes.append((res.x, all_state_vecs))
+                                                      rem_boundary_ids=rem_bounds)
+                mode = Mode(frequency=res.x, internal_states=all_state_vecs)
+                modes.append(mode)
 
-        modes.sort(key=lambda x: x[0])
+        modes.sort(key=lambda x: x.frequency)
 
         logger.info(f"Found {len(modes)} natural modes between {omega_min:.3e} rad/s and {omega_max:.3e} rad/s.")
-        for w, _ in modes:
-            logger.debug(f"Mode at {w:.3e} rad/s.")
+        for mode in modes:
+            logger.debug(f"Mode at {mode.frequency:.3e} rad/s.")
 
         return modes[:n_modes]
 
     def solve(self):
         # TODO: move some of the logic here
         raise NotImplementedError
+
+    def calc_system_modal_masses(self, modes: List[Mode]) -> Vector:
+
+        m_mat = np.zeros(len(modes), dtype=np.float64)
+
+        for s, mode in enumerate(modes):
+            # Calculate modal mass of the system for the s-th mode
+            for e_id in self.topology.elements:
+                elem_info = self.topology.get_element_info(e_id)
+                elem_obj = elem_info.obj
+                # Determine main predecessor
+                pred_id = next(n
+                               for n in self.topology.tree.predecessors(e_id)
+                               if self.topology.tree[n][e_id]['input_port'] == elem_info.main_input_idx
+                               )
+
+                # The local state vector at the input of this specific element
+                local_state = mode.internal_states[pred_id]
+
+                # Retrieve positions for the modal_mass function arguments
+                input_pos = elem_info.ports[elem_info.main_input_idx].pos
+                if isinstance(elem_obj, RigidBody):
+                    # TODO: not the prettiest, should think of something else
+                    output_pos = elem_obj.com_pos  # Use center of mass for rigid bodies
+                else:
+                    output_pos = elem_info.output_port.pos
+
+                # Add the element's contribution to the total system modal mass
+                m_mat[s] += elem_obj.modal_mass(input_pos, output_pos, mode.frequency, local_state)
+
+        return m_mat
+
+    def get_modal_matrices(
+            self,
+            modes: List[Mode],
+            rayleigh: Tuple[float, float] | None = None) -> Tuple[Matrix, Matrix] | Tuple[Matrix, Matrix, Matrix]:
+        m_mat = np.diag(self.calc_system_modal_masses(modes)).astype(np.float64)
+        k_mat = np.diag([mode.frequency**2 * m_mat[i, i] for i, mode in enumerate(modes)]).astype(np.float64)
+        if rayleigh is not None:
+            alpha, beta = rayleigh
+            c_mat = alpha * m_mat + beta * k_mat
+            return m_mat, k_mat, c_mat
+        return m_mat, k_mat

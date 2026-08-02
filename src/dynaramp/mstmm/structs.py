@@ -42,8 +42,6 @@ class Element(ABC):
     def __init__(self, e_id: EntityID):
         self.e_id = e_id
 
-        self._applied_loads = []
-
         # Caches
         self._h_cache: Dict[bytes, Matrix] = {}
         self._u_extract_cache: Dict[bytes, Matrix] = {}
@@ -114,6 +112,11 @@ class Element(ABC):
         self._h_cache[signature] = h_matrix
         return h_matrix
 
+    @abstractmethod
+    def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
+                   local_input_state: Vector) -> np.float64:
+        pass
+
 
 class DiscreteElement(Element, ABC):
     """
@@ -122,16 +125,35 @@ class DiscreteElement(Element, ABC):
     def __init__(self, e_id: EntityID):
         super().__init__(e_id)
 
-    def modal_mass(self, input_pos: VectorLike, com_pos: VectorLike, omega: float,
+    def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
                    local_input_state: Vector) -> np.float64:
+        """
+
+        Parameters
+        ----------
+        input_pos : Vector
+        output_pos : Vector
+            For a rigid body this should be the center of mass
+        omega : float
+        local_input_state : Vector
+            The mode's state vector at the element's main input
+
+        Returns
+        -------
+        np.float64
+            The modal mass of the element for the given mode
+        """
         # Cast inputs to arrays
         input_pos_arr = np.array(input_pos, dtype=np.float64)
-        com_pos_arr = np.array(com_pos, dtype=np.float64)
+        com_pos_arr = np.array(output_pos, dtype=np.float64)
+
         # First, we need the state at the COM of the rigid body
         u_com = self.u(input_pos_arr, com_pos_arr, omega)
-        state_vector = u_com @ local_input_state.astype(np.float64)
-        # Extract the 6x1 kinematic portion (displacements and rotations)
+        state_vector = u_com @ np.array(local_input_state, dtype=np.float64)
+
+        # Truncate the state vectors to keep only the kinematics -> mode shape
         v = state_vector[0:6].reshape(6, 1).astype(np.float64)
+
         # Generalized matrix multiplication
         return np.float64(v.T @ self._m_param_mat @ v)
 
@@ -151,9 +173,25 @@ class ContinuousElement(Element, ABC):
 
     def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
                    local_input_state: np.ndarray) -> np.float64:
+        """
+
+        Parameters
+        ----------
+        input_pos : Vector
+        output_pos : Vector
+        omega : float
+        local_input_state : Vector
+            The mode's state vector at the element's main input
+
+        Returns
+        -------
+        np.float64
+            The modal mass of the element for the given mode
+        """
         output_pos_arr = np.array(output_pos, dtype=np.float64)
         input_pos_arr = np.array(input_pos, dtype=np.float64)
-        beam_len = np.float64(np.linalg.norm(output_pos_arr - input_pos_arr))
+        # TODO: make sure this a generalized, it should be, but double-check
+        beam_len = np.float64(np.linalg.norm(output_pos_arr - input_pos_arr))  # Beam of element
 
         def mass_integrand(x: np.float64) -> np.float64:
             direction = (output_pos_arr - input_pos_arr) / beam_len
@@ -161,9 +199,9 @@ class ContinuousElement(Element, ABC):
 
             # Propagate from the LOCAL input to the intermediate point x
             u_x = self.u(input_pos_arr, current_pos, omega)
-            state_at_x = u_x @ local_input_state.astype(np.float64)
+            state_at_x = u_x @ np.array(local_input_state, dtype=np.float64)
 
-            # Extract the 6x1 kinematic vector
+            # Truncate the state vectors to keep only the kinematics -> mode shape
             v = state_at_x[0:6].reshape(6, 1)
 
             return np.float64(v.T @ self._m_bar_param_mat @ v)
