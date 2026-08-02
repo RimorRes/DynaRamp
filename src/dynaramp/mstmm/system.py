@@ -23,9 +23,9 @@ class System:
     def __init__(self, system_topo: TopologyHandler):
         self.topology = system_topo
 
-    def transfer_mat_along_path(self, path: Sequence[EntityID], omega: np.float64) -> Matrix:
+    def transfer_mat_along_path(self, path: Sequence[EntityID], omega: float) -> Matrix:
         # Get transfer matrix from the output state vector of the path's origin to the output vector of the tail.
-        u_chain = np.identity(13, dtype=np.float64)
+        u_chain = np.identity(12, dtype=np.float64)
 
         for i in range(len(path) - 1):
             e1, e2 = path[i], path[i + 1]
@@ -43,11 +43,7 @@ class System:
 
         return u_chain.astype(np.float64)
 
-    def _get_geometric_constraints(
-            self,
-            boundaries: List[EntityID],
-            omega: np.float64
-    ) -> List[Matrix]:
+    def _get_geometric_constraints(self, boundaries: List[EntityID], omega: float) -> List[Matrix]:
         """
 
         :param boundaries:
@@ -94,7 +90,7 @@ class System:
                     elif b_id in tips_by_branch[other_pred]:
                         g_cols_dict[b_id].append(-k_mats[b_id])
                     else:
-                        g_cols_dict[b_id].append(np.zeros((6, 13), dtype=np.float64))
+                        g_cols_dict[b_id].append(np.zeros((6, 12), dtype=np.float64))
 
         # Convert dictionary to ordered list of column blocks
         has_g_eqs = any(len(blocks) > 0 for blocks in g_cols_dict.values())
@@ -144,12 +140,12 @@ class System:
 
             merged_boundaries.pop(idx2)
             mask = np.ones_like(merged_z_all, dtype=np.bool)
-            mask[(13 * idx2):(13 * (idx2 + 1))] = False
+            mask[(12 * idx2):(12 * (idx2 + 1))] = False
             merged_z_all = merged_z_all[mask]
 
         return merged_boundaries, merged_z_all, merged_t_mats, merged_g_cols
 
-    def overall_transfer_mat(self, omega: np.float64) -> Tuple[Matrix, Vector, Vector, List[EntityID]]:
+    def overall_transfer_mat(self, omega: float) -> Tuple[Matrix, Vector, Vector, List[EntityID]]:
         """
 
         :param omega:
@@ -157,7 +153,7 @@ class System:
         """
         remaining_boundaries = self.topology.boundaries  # Tracks what boundary vectors are actually still in z_red
         # --- TRANSFER MATRIX COMPUTATION ---
-        t_mats = [- np.identity(13)]  # init with root
+        t_mats = [- np.identity(12)]  # init with root
         for t_id in self.topology.tips:
             path = self.topology.resolve_branch_up_to(src=t_id, tgt=self.topology.root.b_id)
             t_mats.append(self.transfer_mat_along_path(path, omega))
@@ -188,18 +184,13 @@ class System:
         u_nz = u_all[:, nonzero_mask]
         z_nz = z_merged[nonzero_mask].astype(np.float64)
         f = - u_nz @ z_nz  # CAREFUL: the (-) is included here, so we need to solve Uz=f, not Uz+f=0
-        # Remove the trivial 13th row
-        triv_mask = np.ones_like(f, dtype=bool)
-        triv_mask[12] = False
-        f = f[triv_mask].astype(np.float64)
-        u_red = u_red[triv_mask, :].astype(np.float64)
 
         if u_red.shape[0] != u_red.shape[1]:
             err_msg = "Invalid boundary conditions: The system is either under-constrained or over-constrained"
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        return u_red, f, z_merged, remaining_boundaries
+        return u_red.astype(np.float64), f.astype(np.float64), z_merged, remaining_boundaries
 
     def reconstruct_boundary_states(self, z_red: Vector, z_merged: Vector,
                                     rem_boundary_ids: List[EntityID]) -> Dict[EntityID, Vector]:
@@ -212,7 +203,7 @@ class System:
             else:
                 z_red_full[i] = x
         # Decompose z_red_full into it's component state vectors
-        z_red_full = z_red_full.reshape((len(rem_boundary_ids), 13))
+        z_red_full = z_red_full.reshape((len(rem_boundary_ids), 12))
         rem_boundaries = {rem_boundary_ids[i]: sv for i, sv in enumerate(z_red_full)}
         # Expand the reduced vector back to full size by reintroducing eliminated virtual boundaries
         eliminated_boundaries = {}
@@ -230,7 +221,7 @@ class System:
 
     def propagate_state(
             self,
-            omega: np.float64,
+            omega: float,
             z_red: Vector,
             z_merged: Vector,
             rem_boundary_ids: List[EntityID],
@@ -258,7 +249,7 @@ class System:
         search_heads = deque([t for t in self.topology.tips])
         searched = {k: False for k in self.topology.elements}
         state_vecs = defaultdict(
-            lambda: np.zeros(13),
+            lambda: np.zeros(12),
             tip_svs
         )
 
@@ -302,11 +293,13 @@ class System:
         # Verify that the propagated state vector satisfies the boundary conditions at the root
         last_elem_id = next(self.topology.tree.predecessors(self.topology.root.b_id))
 
-        rerr = np.linalg.norm(state_vecs[last_elem_id] - root_sv)/np.linalg.norm(root_sv)
-        if rerr < rtol:
-            logger.debug(f"Propagated state matches root boundary state. Relative error = {rerr:.3e}")
+        # Use np.allclose with an absolute tolerance to handle mixed-unit zero crossings
+        if np.allclose(state_vecs[last_elem_id], root_sv, rtol=rtol, atol=1e-5):
+            logger.debug("Propagated state matches root boundary state.")
         else:
-            err_msg = f"Propagated state doesn't match root boundary state. Relative error = {rerr:.3e}"
+            # If it fails, manually calculate the max absolute difference for logging
+            abs_diff = np.max(np.abs(state_vecs[last_elem_id] - root_sv))
+            err_msg = f"Propagated state doesn't match root boundary state. Max absolute error = {abs_diff:.3e}"
             logger.error(err_msg)
             raise ValueError(err_msg)
 
@@ -317,7 +310,7 @@ class System:
 
         return state_vecs
 
-    def _sigma_min(self, omega: np.float64) -> float:
+    def _sigma_min(self, omega: float) -> float:
         """
         Helper for retrieving the smallest singular value of an SVD of U_all(w).
         :param omega:
@@ -334,7 +327,7 @@ class System:
             rtol: float = 1e-5
     ) -> List[Tuple[float, Vector]]:
 
-        omega = np.linspace(omega_min, omega_max, search_res, dtype=np.float64)
+        omega = np.linspace(omega_min, omega_max, search_res)
         # Only retain strictly positive frequencies
         # We want to ignore rigid modes (and avoid dividing by zero) and negative frequencies
         omega = omega[omega > 0]
@@ -351,7 +344,7 @@ class System:
             # Minimize the singular values that approach zero
             res = minimize_scalar(
                 self._sigma_min,
-                bounds=(float(omega[idx - 1]), float(omega[idx + 1])),
+                bounds=(omega[idx - 1], omega[idx + 1]),
                 method="bounded"
             )
             # Apply SVD to the transfer matrix at the refined frequency

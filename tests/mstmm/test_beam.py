@@ -25,8 +25,8 @@ def create_cantilever_beam():
     topo.add_elements(beam_elem)
 
     # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
-    tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None, 1])
-    root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0, 1])
+    tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None])
+    root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0])
 
     topo.add_root(beam_elem, root_boundary, output_pos=(length, 0, 0))
     topo.add_tip(beam_elem, tip_boundary, input_pos=(0, 0, 0))

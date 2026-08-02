@@ -16,18 +16,13 @@ from ..common.types import EntityID, Vector, VectorLike, Matrix
 logger = logging.getLogger(__name__)
 
 # Constants
-NULL_SV = np.r_[np.full(12, None), 1]
+NULL_SV = np.full(12, None)
 NULL_SV.setflags(write=False)
 
 
 class PortType(Enum):
     INPUT = 1
     OUTPUT = 2
-
-
-class LoadType(Enum):
-    FORCE = 1
-    TORQUE = 2
 
 
 # Aliases
@@ -40,7 +35,7 @@ type ElemLike = EntityID | Element
 
 # Data Structures
 class Element(ABC):
-
+    # Use None as an explicit "unbounded" sentinel
     MAX_INPUTS = 1
     MAX_OUTPUTS = 1
 
@@ -53,48 +48,15 @@ class Element(ABC):
         self._h_cache: Dict[bytes, Matrix] = {}
         self._u_extract_cache: Dict[bytes, Matrix] = {}
 
-    def u(self, input_pos: VectorLike, output_pos: VectorLike, omega: np.float64) -> Matrix:
+    @abstractmethod
+    def u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         """
         Returns the extended state transfer matrix for the element.
         :param input_pos: Reference input position.
         :param output_pos: Position of the output slot relative to the main input
         :param omega: vibration frequency (rad/s)
-        :return: Transfer matrix (13x13)
+        :return: Transfer matrix (12x12)
         """
-        # Get the base 12x12 transfer matrix
-        input_pos_arr = np.array(input_pos, dtype=np.float64)
-        output_pos_arr = np.array(output_pos, dtype=np.float64)  # Expensive array-cast outside the loop
-        # Gurantee that _u gets fed Vectors, saves on casts
-        u_base = self._u(input_pos_arr, output_pos_arr, omega)
-
-        # Calculate the total external load vector directly at the output
-        f_load_at_out = np.zeros(12, dtype=np.float64)
-
-        for load in self._applied_loads:
-            if load['type'] == LoadType.FORCE:
-                f = load['force']
-                p = load['point']
-
-                # The lever arm FROM the application point P TO the output O
-                r_po = output_pos_arr - p
-                m = np.cross(r_po, f)
-
-                # Add to the 12x1 load vector (indices 6:9 for moments, 9:12 for forces)
-                f_load_at_out[6:9] += m
-                f_load_at_out[9:12] += f
-            elif load['type'] == LoadType.TORQUE:
-                t = load['torque']
-                f_load_at_out[6:9] += t
-
-        # Assemble the 13x13 extended matrix
-        u_extend = np.block([
-            [u_base, f_load_at_out.reshape(12, 1)],
-            [np.zeros((1, 12)), 1]
-        ]).astype(np.float64)
-        return u_extend
-
-    @abstractmethod
-    def _u(self, input_pos: Vector, output_pos: Vector, omega: np.float64) -> Matrix:
         pass
 
     def u_extract(self, input_pos: VectorLike, output_pos: VectorLike) -> Matrix:
@@ -108,24 +70,23 @@ class Element(ABC):
 
         # The vector FROM the auxiliary input TO the output
         r_io = output_pos_arr - input_pos_arr
-        # TODO: FORCE APPLICATION IS BROKEN
+
         transform = np.block([  # Transform force and moments from Ik to O
             [np.identity(3), skew_sym_mat(r_io)],  # <-- positive sign on the skew!
             [np.zeros((3, 3)), np.identity(3)]
         ]).astype(np.float64)
 
-        u_extract_extend = np.block([
-            [np.zeros((6, 13))],
-            [np.zeros((6, 6)), transform, np.zeros((6, 1))],
-            [np.zeros((1, 13))],
+        u_extract = np.block([
+            [np.zeros((6, 12))],
+            [np.zeros((6, 6)), transform],
         ]).astype(np.float64)
 
-        self._u_extract_cache[signature] = u_extract_extend
-        return u_extract_extend
+        self._u_extract_cache[signature] = u_extract
+        return u_extract
 
     def h(self, ref_pos: VectorLike, input_pos: VectorLike) -> Matrix:
         """
-        Calculates the 6x13 geometric incidence matrix mapping the 13x1 state
+        Calculates the 6x12 geometric incidence matrix mapping the 12x1 state
         vector at ref_pos to the 6x1 kinematic state vector at target_pos.
         :param ref_pos: Reference input position.
         :param input_pos: Input position.
@@ -145,38 +106,13 @@ class Element(ABC):
             [np.zeros((3, 3)), np.identity(3)]
         ]).astype(np.float64)
 
-        # Pad to 6x13 to map from a full [Z_all] state vector
+        # Pad to 6x12 to map from a full [Z_all] state vector
         h_matrix = np.block([
-            transform, np.zeros((6, 7))
+            transform, np.zeros((6, 6))
         ]).astype(np.float64)
 
         self._h_cache[signature] = h_matrix
         return h_matrix
-
-    def apply_force(self, force: VectorLike, point: VectorLike) -> None:
-        """
-        Store the force and its absolute application point.
-        :param force:
-        :param point:
-        """
-        self._applied_loads.append({
-            'type': LoadType.FORCE,
-            'force': np.array(force, dtype=np.float64),
-            'point': np.array(point, dtype=np.float64)
-        })
-
-    def apply_torque(self, torque: VectorLike, point: VectorLike) -> None:
-        """
-        Apply a pure moment to the element
-        :param torque:
-        :param point:
-        :return:
-        """
-        self._applied_loads.append({
-            'type': LoadType.TORQUE,
-            'torque': np.array(torque, dtype=np.float64),
-            'point': np.array(point, dtype=np.float64),  # Point is needed for the sweep evaluation of continuous elements
-        })
 
 
 class DiscreteElement(Element, ABC):
@@ -186,10 +122,13 @@ class DiscreteElement(Element, ABC):
     def __init__(self, e_id: EntityID):
         super().__init__(e_id)
 
-    def modal_mass(self, input_pos: VectorLike, com_pos: VectorLike, omega: np.float64,
+    def modal_mass(self, input_pos: VectorLike, com_pos: VectorLike, omega: float,
                    local_input_state: Vector) -> np.float64:
+        # Cast inputs to arrays
+        input_pos_arr = np.array(input_pos, dtype=np.float64)
+        com_pos_arr = np.array(com_pos, dtype=np.float64)
         # First, we need the state at the COM of the rigid body
-        u_com = self.u(input_pos, com_pos, omega)
+        u_com = self.u(input_pos_arr, com_pos_arr, omega)
         state_vector = u_com @ local_input_state.astype(np.float64)
         # Extract the 6x1 kinematic portion (displacements and rotations)
         v = state_vector[0:6].reshape(6, 1).astype(np.float64)
@@ -210,7 +149,7 @@ class ContinuousElement(Element, ABC):
     def __init__(self, e_id: EntityID):
         super().__init__(e_id)
 
-    def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: np.float64,
+    def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
                    local_input_state: np.ndarray) -> np.float64:
         output_pos_arr = np.array(output_pos, dtype=np.float64)
         input_pos_arr = np.array(input_pos, dtype=np.float64)
@@ -221,7 +160,7 @@ class ContinuousElement(Element, ABC):
             current_pos = input_pos_arr + direction * x
 
             # Propagate from the LOCAL input to the intermediate point x
-            u_x = self.u(input_pos, current_pos, omega)
+            u_x = self.u(input_pos_arr, current_pos, omega)
             state_at_x = u_x @ local_input_state.astype(np.float64)
 
             # Extract the 6x1 kinematic vector
@@ -262,6 +201,6 @@ class CutPoint:
     mat: Matrix = field(init=False)
 
     def __post_init__(self):
-        self.mat = np.identity(13, dtype=np.float64)
+        self.mat = np.identity(12, dtype=np.float64)
         if self.sign_mat_flag:
             self.mat[6:12, 6:12] *= np.float64(-1)

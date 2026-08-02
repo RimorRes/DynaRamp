@@ -172,7 +172,10 @@ class TopologyHandler:
         input_count = ports.count(PortType.INPUT)
         output_count = ports.count(PortType.OUTPUT)
 
-        return input_count < elem.MAX_INPUTS, output_count < elem.MAX_OUTPUTS
+        in_cond = True if elem.MAX_INPUTS is None else input_count < elem.MAX_INPUTS
+        out_cond = True if elem.MAX_OUTPUTS is None else output_count < elem.MAX_OUTPUTS
+
+        return in_cond, out_cond
 
     def add_elements(self, elems: Element | Iterable[Element]) -> TopologyHandler:
         if isinstance(elems, Iterable):

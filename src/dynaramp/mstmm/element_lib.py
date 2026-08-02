@@ -7,7 +7,7 @@ import numpy as np
 
 from .structs import DiscreteElement, ContinuousElement, MasslessMixin
 from ..common.vecmath import skew_sym_mat
-from ..common.types import EntityID, Vector, VectorLike, Matrix
+from ..common.types import EntityID, VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +17,8 @@ class JunctionNode(MasslessMixin, DiscreteElement):
     def __init__(self, e_id: EntityID):
         super().__init__(e_id)
 
-    @staticmethod
-    def _u(self, _=None, __=None, ___=None) -> Matrix:
-        return np.identity(13).astype(np.float64)
+    def u(self, _=None, __=None, ___=None) -> Matrix:
+        return np.identity(12).astype(np.float64)
 
 
 class SpatialElasticHinge(MasslessMixin, DiscreteElement):
@@ -48,7 +47,7 @@ class SpatialElasticHinge(MasslessMixin, DiscreteElement):
             [np.zeros((6, 6)), np.identity(6)],
         ])
 
-    def _u(self, _, __, ___) -> Matrix:
+    def u(self, _=None, __=None, ___=None) -> Matrix:
         return self._u_mat.astype(np.float64)
 
 
@@ -63,8 +62,8 @@ class LumpedMass(DiscreteElement):
             [np.zeros((3, 6))]
         ])
 
-    def _u(self, _, __, omega: float) -> Matrix:
-        u_mat = np.identity(13)
+    def u(self, _, __, omega: float) -> Matrix:
+        u_mat = np.identity(12)
         u_mat[9:12, 0:3] = self.mass * omega**2 * np.identity(3)
         return u_mat.astype(np.float64)
 
@@ -74,9 +73,9 @@ class LumpedMass(DiscreteElement):
 
 
 class RigidBody(DiscreteElement):
-    # TODO: clean this bullshit up
-    MAX_INPUTS = np.iinfo(np.int32).max
-    MAX_OUTPUTS = np.iinfo(np.int32).max
+
+    MAX_INPUTS = None
+    MAX_OUTPUTS = None
 
     def __init__(
             self,
@@ -98,12 +97,14 @@ class RigidBody(DiscreteElement):
         self.inertia = inertia
         self.com_pos = np.array(com)
 
-    def _u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
+    def u(self, input_pos: VectorLike, output_pos: VectorLike, omega: float) -> Matrix:
+        input_pos_arr = np.array(input_pos, dtype=np.float64)
+        output_pos_arr = np.array(output_pos, dtype=np.float64)
         # The vector FROM the input TO the output
-        r_io = output_pos - input_pos
+        r_io = output_pos_arr - input_pos_arr
 
         # The vector FROM the input TO the center of mass
-        r_ic = self.com_pos - input_pos
+        r_ic = self.com_pos - input_pos_arr
 
         # Inertia matrix with respect to the input, parallel axis theorem (quadratic form so sign of r_ic is irrelevant)
         j = self.inertia + self.mass * (np.dot(r_ic, r_ic) * np.identity(3) - np.outer(r_ic, r_ic))
@@ -169,9 +170,11 @@ class EulerBernoulliBeam(ContinuousElement):
     def _krylov_v(z: float) -> float:
         return (np.sinh(z) - np.sin(z)) / 2
 
-    def _u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
+    def u(self, input_pos: VectorLike, output_pos: VectorLike, omega: float) -> Matrix:
         # TODO: Potentially broken logic here because of the fixed XYZ-LWH coordinate system
-        x, y, z = output_pos - input_pos
+        input_pos_arr = np.array(input_pos, dtype=np.float64)
+        output_pos_arr = np.array(output_pos, dtype=np.float64)
+        x, y, z = output_pos_arr - input_pos_arr
 
         beta_x = np.sqrt(self.mu * omega**2 / (self.e * self.a))
         lam_y = np.power((self.mu * omega**2 / (self.e * self.iz)), 1/4)
