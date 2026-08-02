@@ -42,7 +42,7 @@ def create_mass_spring_oscillator():
     topo.connect_elements(mass_elem, spring_elem2, src_pos=(0, 0, s), dst_pos=(0, 0, 0))
     topo.connect_elements(spring_elem2, mass_elem2, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
 
-    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
+    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z]
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0])
 
@@ -88,7 +88,7 @@ def create_parallel_mass_spring_oscillator(n):
         tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None])
         topo.add_tip(spring, tip_boundary, (0, 0, 0))
 
-    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
+    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z]
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0])
     topo.add_root(mass_elem, root_boundary, output_pos=(0, 0, s))
 
@@ -135,7 +135,7 @@ def create_simple_multi_output_system():
     topo.connect_elements(mass_1, spring_3, src_pos=(s / 2, 0, s), dst_pos=(0, 0, 0))
     topo.connect_elements(spring_2, mass_4, src_pos=(0, 0, length), dst_pos=(0, 0, 0))
     topo.connect_elements(spring_3, mass_4, src_pos=(0, 0, length), dst_pos=(s, 0, s),)
-    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
+    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z]
     tip_sv = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0])
     root_sv = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None])
 
@@ -217,7 +217,7 @@ def test_mass_spring_oscillator():
     assert np.allclose(f, 0)
 
     modes = oscillator.natural_modes(2, omega_max=50)
-    ws, shapes = zip(*modes)
+    ws = [m.frequency for m in modes]
 
     assert np.allclose(ws, [omega1, omega2], rtol=1e-3)
 
@@ -235,9 +235,9 @@ def test_parallel_mass_spring_oscillator():
     u, f, _, __ = oscillator.overall_transfer_mat(omega)
     assert np.allclose(f, 0)
 
-    w, _ = oscillator.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
+    mode = oscillator.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
 
-    assert np.isclose(w, omega, rtol=1e-3)
+    assert np.isclose(mode.frequency, omega, rtol=1e-3)
 
 
 def test_multi_output_element():
@@ -249,9 +249,9 @@ def test_multi_output_element():
     omega_max = omega + 1
 
     system = create_simple_multi_output_system()
-    w, _ = system.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
+    mode = system.natural_modes(1, omega_min=omega_min, omega_max=omega_max)[0]
 
-    assert np.isclose(w, omega, rtol=1e-3)
+    assert np.isclose(mode.frequency, omega, rtol=1e-3)
 
 
 def test_simple_closed_loop_system():
@@ -261,9 +261,9 @@ def test_simple_closed_loop_system():
     omega = np.sqrt(4*k/m)
 
     system = create_simple_closed_loop_system()
-    w, _ = system.natural_modes(1, omega_min=6, omega_max=7)[0]
+    mode = system.natural_modes(1, omega_min=6, omega_max=7)[0]
 
-    assert np.isclose(w, omega, rtol=1e-3)
+    assert np.isclose(mode.frequency, omega, rtol=1e-3)
 
 
 def test_closed_loop_auto_cut():
@@ -273,6 +273,6 @@ def test_closed_loop_auto_cut():
     omega = np.sqrt(4 * k / m)
 
     system = create_simple_closed_loop_system(auto_cut=True)
-    w, _ = system.natural_modes(1, omega_min=6, omega_max=7)[0]
+    mode = system.natural_modes(1, omega_min=6, omega_max=7)[0]
 
-    assert np.isclose(w, omega, rtol=1e-3)
+    assert np.isclose(mode.frequency, omega, rtol=1e-3)

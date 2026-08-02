@@ -9,7 +9,6 @@ from dataclasses import dataclass
 
 import networkx as nx
 import numpy as np
-from pygments.styles import default
 
 from ..common.types import EntityID, is_entity_id, Vector, VectorLike
 from .structs import NULL_SV, PortType, Element, ElemLike, Boundary, CutPoint
@@ -449,18 +448,20 @@ class TopologyHandler:
                     break
         if root_cyc:
             # We now need to choose where to cut
-            # We can try cutting at anentry point of the loop
+            # Prefer cutting at an entry point of the loop (node with in_degree > 1). If none exists, cut anywhere.
+            cut_added = False
             for node in root_cyc:
                 if self._internal_graph.in_degree(node) > 1:
                     pred_in_cycle = next(x for x in self._internal_graph.predecessors(node) if x in root_cyc)
                     connections_to_cut.append((pred_in_cycle, node))
+                    cut_added = True
                     break
             # If this fails, we can just cut anywhere
-            node = root_cyc.pop()
-            root_cyc.add(node)
-            pred_in_cycle = next(x for x in self._internal_graph.predecessors(node) if x in root_cyc)
-            logger.debug((pred_in_cycle, node))
-            connections_to_cut.append((pred_in_cycle, node))
+            if not cut_added:
+                node = next(iter(root_cyc))
+                pred_in_cycle = next(x for x in self._internal_graph.predecessors(node) if x in root_cyc)
+                logger.debug((pred_in_cycle, node))
+                connections_to_cut.append((pred_in_cycle, node))
 
         # Return edges to be cut
         logger.info(f"Found {len(connections_to_cut)} cuts to be made.")

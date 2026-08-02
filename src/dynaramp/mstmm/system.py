@@ -147,7 +147,7 @@ class System:
                 merged_g_cols.pop(idx2)
 
             merged_boundaries.pop(idx2)
-            mask = np.ones_like(merged_z_all, dtype=np.bool)
+            mask = np.ones_like(merged_z_all, dtype=bool)
             mask[(12 * idx2):(12 * (idx2 + 1))] = False
             merged_z_all = merged_z_all[mask]
 
@@ -333,7 +333,7 @@ class System:
             omega_max: int = 1000,
             search_res: int = 10000,
             rtol: float = 1e-5
-    ) -> List[Tuple[float, Vector]]:
+    ) -> List[Mode]:
 
         omega = np.linspace(omega_min, omega_max, search_res)
         # Only retain strictly positive frequencies

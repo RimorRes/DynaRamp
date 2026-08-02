@@ -24,7 +24,7 @@ def create_cantilever_beam():
 
     topo.add_elements(beam_elem)
 
-    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z, 1]
+    # z = [X, Y, Z, Theta_x, Theta_y, Theta_z, M_x, M_y, M_z, Q_x, Q_y, Q_z]
     tip_boundary = np.array([0, 0, 0, 0, 0, 0, None, None, None, None, None, None])
     root_boundary = np.array([None, None, None, None, None, None, 0, 0, 0, 0, 0, 0])
 
@@ -41,8 +41,8 @@ def test_cantilever_beam():
     cant_beam = create_cantilever_beam()
     modes = cant_beam.natural_modes(7)
 
-    for w, shape in modes:
-        u, f, z_merged, rem_bounds = cant_beam.overall_transfer_mat(w)
+    for m in modes:
+        u, f, z_merged, rem_bounds = cant_beam.overall_transfer_mat(m.frequency)
         assert np.allclose(f, 0)
 
         z_red = null_space(u, rcond=1e-8).reshape(12)
@@ -50,4 +50,7 @@ def test_cantilever_beam():
 
         bound_svs = cant_beam.reconstruct_boundary_states(z_red, z_merged_homogenous, rem_bounds)
 
-        assert np.allclose(np.abs(bound_svs[cant_beam.topology.root.b_id]), np.abs(shape[cant_beam.topology.root.b_id]))
+        assert np.allclose(
+            np.abs(bound_svs[cant_beam.topology.root.b_id]),
+            np.abs(m.internal_states[cant_beam.topology.root.b_id])
+        )
