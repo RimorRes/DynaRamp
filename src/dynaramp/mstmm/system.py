@@ -8,7 +8,6 @@ from collections import deque, defaultdict
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.optimize import minimize_scalar
-from scipy.differentiate import derivative
 
 from ..common.types import EntityID, Vector, Matrix
 from .topology import TopologyHandler
@@ -307,7 +306,7 @@ class System:
             logger.debug("Propagated state matches root boundary state.")
         else:
             # If it fails, manually calculate the max absolute difference for logging
-            abs_diff = np.max(np.abs(state_vecs[last_elem_id] - root_sv))
+            abs_diff = float(np.max(np.abs(state_vecs[last_elem_id] - root_sv)))
             err_msg = f"Propagated state doesn't match root boundary state. Max absolute error = {abs_diff:.3e}"
             logger.error(err_msg)
             raise ValueError(err_msg)
@@ -333,8 +332,33 @@ class System:
             n_modes: int, omega_min=0,
             omega_max: int = 1000,
             search_res: int = 10000,
-            rtol: float = 1e-5
+            rtol: float = 1e-5,
+            mtol: float = 1e-5
     ) -> List[Mode]:
+        """
+
+        Parameters
+        ----------
+        n_modes: int
+            The number of natural modes to find.
+        omega_min: float
+            The minimum frequency for the search.
+        omega_max: float
+            The maximum frequency for the search.
+        search_res: int
+            The number of points to search between omega_min and omega_max.
+        rtol: float
+            Relative tolerance for the reciprocal condition number of the transfer matrix.
+            If the smallest singular value is less than rtol times the largest singular value,
+            the mode is considered valid.
+        mtol: float
+            Absolute tolerance for merging modes that are very close in frequency.
+            If two modes are within mtol of each other, they will be considered the same mode and only one will be kept.
+
+        Returns
+        -------
+
+        """
 
         omega = np.linspace(omega_min, omega_max, search_res)
         # Only retain strictly positive frequencies
@@ -354,10 +378,16 @@ class System:
             res = minimize_scalar(
                 self._sigma_min,
                 bounds=(omega[idx - 1], omega[idx + 1]),
-                method="bounded"
+                method="bounded",
+                tol=mtol
             )
+            refined_omega: float = res.x
+            # It shouldn't happen if the sweep is fine enough, but we should avoid duplicating modes
+            if any(np.isclose(refined_omega, m.frequency, rtol=mtol) for m in modes):
+                continue
+
             # Apply SVD to the transfer matrix at the refined frequency
-            u, _, z_merged, rem_bounds = self.overall_transfer_mat(res.x)
+            u, _, z_merged, rem_bounds = self.overall_transfer_mat(refined_omega)
             _, s, vh = np.linalg.svd(u)
             # TODO: make homogenous solution cleaner
             # FIX: Turn OFF external forcing and non-zero boundaries for homogenous mode shapes
@@ -366,13 +396,13 @@ class System:
             # Reciprocal condition number
             rcond = s[-1] / s[0]
 
-            logger.info(f"Mode candidate at {res.x:.3e} rad/s.")
+            logger.info(f"Mode candidate at {float(refined_omega):.3e} rad/s.")
             logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
             # If rcond passes the tolerance, save the frequency and mode states
             if rcond < rtol:
-                all_state_vecs = self.propagate_state(omega=res.x, z_red=vh[-1], z_merged=z_merged_homogenous,
+                all_state_vecs = self.propagate_state(omega=refined_omega, z_red=vh[-1], z_merged=z_merged_homogenous,
                                                       rem_boundary_ids=rem_bounds)
-                mode = Mode(frequency=res.x, internal_states=all_state_vecs)
+                mode = Mode(frequency=refined_omega, internal_states=all_state_vecs)
                 modes.append(mode)
 
         modes.sort(key=lambda x: x.frequency)
@@ -429,52 +459,3 @@ class System:
             c_mat = alpha * m_mat + beta * k_mat
             return m_mat, k_mat, c_mat
         return m_mat, k_mat
-
-    def mode_shape(self, modes: List[Mode], elem_id: EntityID, x_offset: float) -> Tuple[Matrix, Matrix]:
-        """
-        Build Phi_r, Phi_theta in Eq. (16): the 3 x n translational and
-        rotational mode-shape interpolation matrices at a point x_offset
-        along elem_id's local axis from its main input port.
-        """
-        elem_info = self.topology.get_element_info(elem_id)
-        input_pos = elem_info.ports[elem_info.main_input_idx].pos
-        output_pos = input_pos + np.array([x_offset, 0, 0])
-        pred_id = next(
-            n for n in self.topology.tree.predecessors(elem_id)
-            if self.topology.tree[n][elem_id]['input_port'] == elem_info.main_input_idx
-        )
-
-        cols = []
-        for mode in modes:
-            z = elem_info.obj.u(input_pos, output_pos, mode.frequency) @ mode.internal_states[pred_id]
-            cols.append(z[0:6])  # kinematics only: [r; theta]
-        phi = np.column_stack(cols).astype(np.float64)  # 6 x n
-        return phi[0:3, :], phi[3:6, :]
-
-    # Numerical derivation.
-    # TODO (low priority): offer the option to switch to analytical
-    # TODO (medium priority): switch to better automatic differentiation (sympy?)
-    def phi_r_derivatives(self, modes: List[Mode], elem_id: EntityID, x_offset: float) -> Tuple[Matrix, Matrix]:
-        """
-        Compute the first 2 spatial derivatives of Phi_r
-        Parameters
-        ----------
-        modes
-        elem_id
-        x_offset
-
-        Returns
-        -------
-
-        """
-        def phi_r_func(x):
-            res = []
-            for i in range(len(x)):
-                phi_r, _ = self.mode_shape(modes, elem_id, x[i])
-                res.append(phi_r)
-            return np.stack(res)
-
-        phi_r_prime = derivative(phi_r_func, x_offset).astype(np.float64)
-        phi_r_doubleprime = derivative(lambda x: derivative(phi_r_func, x), x_offset).astype(np.float64)
-
-        return phi_r_prime, phi_r_doubleprime
