@@ -19,7 +19,7 @@ def skew_sym_mat(vec: VectorLike) -> Matrix:
     :return:
     """
 
-    vec = np.array(vec)
+    vec = np.array(vec, dtype=np.float64)
     # Verify shape
     match vec.shape:
         # "Flat" vector
@@ -40,4 +40,4 @@ def skew_sym_mat(vec: VectorLike) -> Matrix:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-    return ssv
+    return ssv.astype(np.float64)
