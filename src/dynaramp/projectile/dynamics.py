@@ -7,18 +7,18 @@ import numpy as np
 
 from ..common.types import Vector, Matrix
 from ..common.vecmath import skew_sym_mat
-from .missile import Missile
-from .kinematics import MissileKinematicState
+from .projectile import Projectile
+from .kinematics import ProjectileKinematicState
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class MissileEOM:
+class ProjectileEOM:
     """
-    The missile's equations of motion within the launch rail (section 3.3, Eqs. 43-48),
+    The projectile's equations of motion within the launch rail (section 3.3, Eqs. 43-48),
     projected in K_I. The six coefficient blocks map the launch-vehicle modal acceleration
-    p_ddot and the missile quasi-acceleration y_dot to the external resultants:
+    p_ddot and the projectile quasi-acceleration y_dot to the external resultants:
 
         M_Tp p_ddot + M_Ty y_dot = h_T + sum_k I_q_O1,k      (translational, Eq. 43)
         M_Rp p_ddot + M_Ry y_dot = h_R + sum_k I_m_O1,k      (rotational,   Eq. 44)
@@ -35,14 +35,14 @@ class MissileEOM:
     h_r: Vector    # 3
 
     @classmethod
-    def assemble(cls, kin: MissileKinematicState, missile: Missile) -> "MissileEOM":
+    def assemble(cls, kin: ProjectileKinematicState, projectile: Projectile) -> "ProjectileEOM":
         """
-        Assemble the six blocks from a kinematic state (section 3.1-3.2) and the missile's
+        Assemble the six blocks from a kinematic state (section 3.1-3.2) and the projectile's
         inertial properties.
         """
-        m = missile.mass
-        r_o1c = kin.a_ib @ missile.com_o1                       # I_r_O1C (Eq. 48 note)
-        i_o1 = kin.a_ib @ missile.inertia_o1 @ kin.a_ib.T       # I_I_O1 (body inertia about O1, in K_I)
+        m = projectile.mass
+        r_o1c = kin.a_ib @ projectile.com_o1                       # I_r_O1C (Eq. 48 note)
+        i_o1 = kin.a_ib @ projectile.inertia_o1 @ kin.a_ib.T       # I_I_O1 (body inertia about O1, in K_I)
         rc = skew_sym_mat(r_o1c)
         w = skew_sym_mat(kin.omega_ib)
 

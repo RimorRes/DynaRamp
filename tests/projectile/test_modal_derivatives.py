@@ -3,7 +3,7 @@ import pytest
 from scipy.differentiate import derivative
 
 import dynaramp.mstmm as dyn
-from dynaramp.missile import GuideModalField, ModalShape
+from dynaramp.projectile import GuideModalField, ModalShape
 from dynaramp.common.vecmath import euler_zyx
 
 
@@ -39,7 +39,7 @@ X0 = 3.7  # interior axial station on the length-10 beam
 
 def test_modal_shape_shapes(cantilever_modes):
     system, elem, modes = cantilever_modes
-    field = GuideModalField(system, elem, modes)
+    field = GuideModalField.from_elements(system, [elem], modes)
     n = len(modes)
     ms = field.evaluate(X0)
     assert isinstance(ms, ModalShape)
@@ -65,7 +65,7 @@ def _scalar_entry(field, block, i, j):
 
 def test_first_derivative_matches_scipy(cantilever_modes):
     system, elem, modes = cantilever_modes
-    field = GuideModalField(system, elem, modes)
+    field = GuideModalField.from_elements(system, [elem], modes)
     ms = field.evaluate(X0)
     n = len(modes)
     for block, mine in (("r", ms.phi_r_d1), ("theta", ms.phi_theta_d1)):
@@ -78,7 +78,7 @@ def test_first_derivative_matches_scipy(cantilever_modes):
 
 def test_second_derivative_matches_central_difference(cantilever_modes):
     system, elem, modes = cantilever_modes
-    field = GuideModalField(system, elem, modes)
+    field = GuideModalField.from_elements(system, [elem], modes)
     ms = field.evaluate(X0)
     n = len(modes)
     h = 5e-4  # independent step, different from the implementation's 1e-4
@@ -93,9 +93,9 @@ def test_second_derivative_matches_central_difference(cantilever_modes):
 def test_a_ir_projection(cantilever_modes):
     # With a non-identity A_IR, every projected block must be R @ (identity-frame block).
     system, elem, modes = cantilever_modes
-    field_i = GuideModalField(system, elem, modes)
+    field_i = GuideModalField.from_elements(system, [elem], modes)
     r = euler_zyx(0.2, -0.3, 0.1)
-    field_r = GuideModalField(system, elem, modes, a_ir=r)
+    field_r = GuideModalField.from_elements(system, [elem], modes, a_ir=r)
 
     mi = field_i.evaluate(X0)
     mr = field_r.evaluate(X0)

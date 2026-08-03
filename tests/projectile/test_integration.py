@@ -2,13 +2,13 @@ import numpy as np
 import pytest
 
 import dynaramp.mstmm as dyn
-from dynaramp.missile import (
+from dynaramp.projectile import (
     GuideModalField,
-    MissileKinematics,
-    MissileEOM,
-    Missile,
+    ProjectileKinematics,
+    ProjectileEOM,
+    Projectile,
     Slider,
-    MissileState,
+    ProjectileState,
 )
 
 
@@ -37,8 +37,8 @@ def pipeline():
     system, elem = _build_canister()
     modes = system.natural_modes(3, omega_max=400, search_res=4000)
     assert len(modes) >= 1
-    field = GuideModalField(system, elem, modes)
-    missile = Missile(
+    field = GuideModalField.from_elements(system, [elem], modes)
+    projectile = Projectile(
         mass=250.0,
         inertia_com=np.diag([3.0, 90.0, 90.0]),
         com_o1=(1.5, 0.0, 0.0),               # COM 1.5 m ahead of the rear slider pair
@@ -49,21 +49,21 @@ def pipeline():
             Slider((2.8, -0.12, 0.0), 0.02),
         ],
     )
-    return field, missile
+    return field, projectile
 
 
 def test_pipeline_runs_shapes_finite(pipeline):
-    field, missile = pipeline
+    field, projectile = pipeline
     n = field.n_modes
-    # A sliding missile: 12 m/s axially, small lateral motion and attitude, small deformation.
+    # A sliding projectile: 12 m/s axially, small lateral motion and attitude, small deformation.
     x = np.array([3.0, 0.02, -0.01, 0.03, -0.02, 0.01])
     x_dot = np.array([12.0, 0.10, -0.05, 0.02, 0.01, -0.03])
-    st = MissileState.from_config_rates(x, x_dot)
+    st = ProjectileState.from_config_rates(x, x_dot)
     p = 1e-3 * np.linspace(1.0, 2.0, n)
     p_dot = 1e-3 * np.linspace(-1.0, 1.0, n)
 
-    kin = MissileKinematics(field).evaluate(st, p, p_dot)
-    eom = MissileEOM.assemble(kin, missile)
+    kin = ProjectileKinematics(field).evaluate(st, p, p_dot)
+    eom = ProjectileEOM.assemble(kin, projectile)
 
     for block in (eom.m_tp, eom.m_ty, eom.m_rp, eom.m_ry, eom.h_t, eom.h_r):
         assert np.all(np.isfinite(block))
@@ -76,12 +76,12 @@ def test_pipeline_runs_shapes_finite(pipeline):
 
 
 def test_coupled_block_row_dimensions(pipeline):
-    # The two missile block-rows of the coupled system (Eq. 67) must be 3 x (n + 6).
-    field, missile = pipeline
+    # The two projectile block-rows of the coupled system (Eq. 67) must be 3 x (n + 6).
+    field, projectile = pipeline
     n = field.n_modes
-    st = MissileState(np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(6))
-    kin = MissileKinematics(field).evaluate(st, np.zeros(n), np.zeros(n))
-    eom = MissileEOM.assemble(kin, missile)
+    st = ProjectileState(np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(6))
+    kin = ProjectileKinematics(field).evaluate(st, np.zeros(n), np.zeros(n))
+    eom = ProjectileEOM.assemble(kin, projectile)
 
     trans_row = np.hstack([eom.m_tp, eom.m_ty])   # [M_Tp | M_Ty]
     rot_row = np.hstack([eom.m_rp, eom.m_ry])      # [M_Rp | M_Ry]
@@ -92,11 +92,11 @@ def test_coupled_block_row_dimensions(pipeline):
 
 def test_full_rest_has_zero_bias(pipeline):
     # p = p_dot = 0 and y = 0: no motion => omega_IB = 0 and both bias vectors vanish.
-    field, missile = pipeline
+    field, projectile = pipeline
     n = field.n_modes
-    st = MissileState(np.array([3.0, 0.05, -0.03, 0.1, -0.05, 0.2]), np.zeros(6))
-    kin = MissileKinematics(field).evaluate(st, np.zeros(n), np.zeros(n))
-    eom = MissileEOM.assemble(kin, missile)
+    st = ProjectileState(np.array([3.0, 0.05, -0.03, 0.1, -0.05, 0.2]), np.zeros(6))
+    kin = ProjectileKinematics(field).evaluate(st, np.zeros(n), np.zeros(n))
+    eom = ProjectileEOM.assemble(kin, projectile)
 
     assert np.allclose(kin.omega_ib, 0.0, atol=1e-12)
     assert np.allclose(eom.h_t, 0.0, atol=1e-12)
@@ -108,15 +108,15 @@ def test_axial_slide_produces_quadratic_convective_coupling(pipeline):
     # that scale exactly as v_P'^2 (zeta_TP' ~ v^2 Phi'' p, omega_IL ~ v). This is a
     # normalization-independent signature of the convective coupling, robust to the
     # arbitrary scale of the MSTMM mode shapes.
-    field, missile = pipeline
+    field, projectile = pipeline
     n = field.n_modes
     p = np.linspace(1e-3, 3e-3, n)  # nonzero canister deformation
 
     def zeta(v):
         x = np.array([3.0, 0.02, -0.01, 0.0, 0.0, 0.0])
         x_dot = np.array([v, 0.0, 0.0, 0.0, 0.0, 0.0])
-        st = MissileState.from_config_rates(x, x_dot)
-        return MissileKinematics(field).evaluate(st, p, np.zeros(n)).zeta_to1
+        st = ProjectileState.from_config_rates(x, x_dot)
+        return ProjectileKinematics(field).evaluate(st, p, np.zeros(n)).zeta_to1
 
     z1 = zeta(15.0)
     z2 = zeta(30.0)

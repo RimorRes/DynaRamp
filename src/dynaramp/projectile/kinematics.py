@@ -8,18 +8,18 @@ import numpy as np
 from ..common.types import Vector, VectorLike, Matrix
 from ..common.vecmath import skew_sym_mat, euler_zyx, small_rot
 from .modal_field import GuideModalField, ModalShape
-from .state import MissileState
+from .state import ProjectileState
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class MissileKinematicState:
+class ProjectileKinematicState:
     """
     Result of the section 3.1-3.2 kinematic analysis at one instant, all projected in the
     inertial frame K_I. The influence blocks map the launch-vehicle modal rates (p_dot,
-    p_ddot) and the missile quasi-velocity (y, y_dot) to the absolute velocity/acceleration
-    of O1 and the absolute angular velocity/acceleration of the missile body K_B:
+    p_ddot) and the projectile quasi-velocity (y, y_dot) to the absolute velocity/acceleration
+    of O1 and the absolute angular velocity/acceleration of the projectile body K_B:
 
         I_r_dot_O1  = L_TO1 p_dot  + J_TO1 y
         I_r_ddot_O1 = L_TO1 p_ddot + J_TO1 y_dot + zeta_TO1
@@ -38,11 +38,11 @@ class MissileKinematicState:
     zeta_ro1: Vector     # 3    rotational convective term
 
 
-class MissileKinematics:
+class ProjectileKinematics:
     """
-    Kinematics of the missile within the bending launch rail (sections 3.1-3.2).
+    Kinematics of the projectile within the bending launch rail (sections 3.1-3.2).
 
-    Depends only on the rail modal field (the section 2 -> 3 seam) and the missile's
+    Depends only on the rail modal field (the section 2 -> 3 seam) and the projectile's
     generalized state; it needs no inertial properties, which enter only in the equations
     of motion (section 3.3).
     """
@@ -50,7 +50,7 @@ class MissileKinematics:
     def __init__(self, field: GuideModalField):
         self.field: GuideModalField = field
 
-    def evaluate(self, state: MissileState, p: VectorLike, p_dot: VectorLike) -> MissileKinematicState:
+    def evaluate(self, state: ProjectileState, p: VectorLike, p_dot: VectorLike) -> ProjectileKinematicState:
         """
         Assemble the influence blocks at the current state and launch-vehicle modal
         coordinates p and rates p_dot.
@@ -64,10 +64,10 @@ class MissileKinematics:
     def _assemble(
             shape: ModalShape,
             a_ir: Matrix,
-            state: MissileState,
+            state: ProjectileState,
             p: Vector,
             p_dot: Vector,
-    ) -> MissileKinematicState:
+    ) -> ProjectileKinematicState:
         y = state.y
         v = state.v_p_prime               # v_P' = x_R_dot
         e_x = a_ir[:, 0]                   # a_ir @ [1, 0, 0]: axial unit vector in K_I
@@ -122,7 +122,7 @@ class MissileKinematics:
         zeta_ro1 = zeta_rpp + w_il_skew @ a_il @ y[3:6]                             # Eq. 40
         omega_ib = l_rp @ p_dot + j_ro1 @ y                                         # Eq. 39
 
-        return MissileKinematicState(
+        return ProjectileKinematicState(
             a_il=a_il.astype(np.float64),
             a_ib=a_ib.astype(np.float64),
             omega_il=omega_il.astype(np.float64),

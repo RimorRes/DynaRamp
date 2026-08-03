@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class MissileState:
+class ProjectileState:
     """
-    Generalized state of the missile relative to the launch rail (Eqs. 22-24).
+    Generalized state of the projectile relative to the launch rail (Eqs. 22-24).
 
     Configuration
         x = [x_R, y_L, z_L, gamma, psi, phi]^T = [s_B; a_B]
@@ -79,7 +79,7 @@ class MissileState:
 
     # --- x <-> y conversions via H ---
     @classmethod
-    def from_config_rates(cls, x: VectorLike, x_dot: VectorLike) -> "MissileState":
+    def from_config_rates(cls, x: VectorLike, x_dot: VectorLike) -> "ProjectileState":
         """Build a state from configuration x and configuration rates x_dot, via y = H x_dot."""
         x = np.array(x, dtype=np.float64).reshape(6)
         x_dot = np.array(x_dot, dtype=np.float64).reshape(6)

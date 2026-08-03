@@ -7,7 +7,7 @@ import numpy as np
 
 from .structs import DiscreteElement, ContinuousElement, MasslessMixin
 from ..common.vecmath import skew_sym_mat
-from ..common.types import EntityID, VectorLike, Matrix
+from ..common.types import EntityID, Vector, VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ class JunctionNode(MasslessMixin, DiscreteElement):
     def __init__(self, e_id: EntityID):
         super().__init__(e_id)
 
-    def u(self, _=None, __=None, ___=None) -> Matrix:
+    def u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         return np.identity(12).astype(np.float64)
 
 
@@ -47,7 +47,7 @@ class SpatialElasticHinge(MasslessMixin, DiscreteElement):
             [np.zeros((6, 6)), np.identity(6)],
         ])
 
-    def u(self, _=None, __=None, ___=None) -> Matrix:
+    def u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         return self._u_mat.astype(np.float64)
 
 
@@ -62,7 +62,7 @@ class LumpedMass(DiscreteElement):
             [np.zeros((3, 6))]
         ])
 
-    def u(self, _, __, omega: float) -> Matrix:
+    def u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         u_mat = np.identity(12)
         u_mat[9:12, 0:3] = self.mass * omega**2 * np.identity(3)
         return u_mat.astype(np.float64)

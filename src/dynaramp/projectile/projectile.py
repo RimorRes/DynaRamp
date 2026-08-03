@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Slider:
     """
-    A slider on the missile: the spherical ball head that rides inside a guide.
+    A slider on the projectile: the spherical ball head that rides inside a guide.
     Used by the section 4 slider-guide contact model.
 
     Attributes
@@ -34,25 +34,25 @@ class Slider:
 
 
 @dataclass
-class Missile:
+class Projectile:
     """
-    Rigid-body parameters of the missile (section 3.3).
+    Rigid-body parameters of the projectile (section 3.3).
 
-    The missile body frame K_B has its origin at O1, the center of the rear slider pair,
-    with x along the missile symmetry axis toward the head. Inertia is supplied about the
+    The projectile body frame K_B has its origin at O1, the center of the rear slider pair,
+    with x along the projectile symmetry axis toward the head. Inertia is supplied about the
     center of mass and shifted to O1 on demand (parallel-axis), mirroring the convention
     used by ``mstmm.element_lib.RigidBody``.
 
     Attributes
     ----------
     mass : float
-        Total mass m of the missile.
+        Total mass m of the projectile.
     inertia_com : Matrix
         3x3 inertia tensor about the center of mass C, in the body frame K_B.
     com_o1 : VectorLike
         B_r_O1C, position of the center of mass C relative to O1, in K_B. Defaults to O1.
     sliders : List[Slider]
-        Sliders distributed on the missile (front/rear pairs, optionally a middle pair),
+        Sliders distributed on the projectile (front/rear pairs, optionally a middle pair),
         consumed by the section 4 contact model.
     """
     mass: float

@@ -46,7 +46,7 @@ def skew_sym_mat(vec: VectorLike) -> Matrix:
 
 def euler_zyx(gamma: float, psi: float, phi: float) -> Matrix:
     """
-    Rotation matrix A_LB transforming coordinates from the missile body frame K_B
+    Rotation matrix A_LB transforming coordinates from the projectile body frame K_B
     to the launch frame K_L, built from the z-y-x Euler angles of Eq. (23):
     pitch gamma (about z), yaw psi (about y), roll phi (about x), applied intrinsically
     in the order pitch -> yaw -> roll.
@@ -115,7 +115,7 @@ def h_rotation_matrix_dot(gamma: float, psi: float, gamma_dot: float, psi_dot: f
 
 def h_matrix(gamma: float, psi: float) -> Matrix:
     """
-    The 6x6 kinematic map H of Eq. (26) relating the missile generalized velocity
+    The 6x6 kinematic map H of Eq. (26) relating the projectile generalized velocity
     y = [s_B_dot; L_omega_LB] to the configuration rate x_dot via y = H @ x_dot.
     H = blkdiag(I3, H_R).
 
