@@ -3,7 +3,7 @@ import pytest
 
 import dynaramp.mstmm as dyn
 from dynaramp.missile import (
-    RailModalField,
+    GuideModalField,
     MissileKinematics,
     MissileEOM,
     Missile,
@@ -37,7 +37,7 @@ def pipeline():
     system, elem = _build_canister()
     modes = system.natural_modes(3, omega_max=400, search_res=4000)
     assert len(modes) >= 1
-    field = RailModalField(system, elem, modes)
+    field = GuideModalField(system, elem, modes)
     missile = Missile(
         mass=250.0,
         inertia_com=np.diag([3.0, 90.0, 90.0]),

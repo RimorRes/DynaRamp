@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 import dynaramp.mstmm as dyn
-from dynaramp.missile import RailModalField, MissileKinematics, MissileState
-from dynaramp.common.vecmath import skew_sym_mat, euler_zyx, small_rot, h_matrix, h_dot_matrix
+from dynaramp.missile import GuideModalField, MissileKinematics, MissileState
+from dynaramp.common.vecmath import small_rot, h_matrix, h_dot_matrix
 
 
 def _build_cantilever():
@@ -30,7 +30,7 @@ def field():
     system, elem = _build_cantilever()
     modes = system.natural_modes(3, omega_max=300, search_res=3000)
     assert len(modes) >= 1
-    return RailModalField(system, elem, modes)
+    return GuideModalField(system, elem, modes)
 
 
 X0 = 3.7

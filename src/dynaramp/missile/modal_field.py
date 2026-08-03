@@ -39,12 +39,12 @@ class ModalShape:
     phi_theta_d2: Matrix
 
 
-class RailModalField:
+class GuideModalField:
     """
     The section 2 -> section 3 seam.
 
-    Wraps an MSTMM ``System`` together with one flexible element (the launch rail)
-    and its precomputed modes, and exposes the rail's mode-shape interpolation field
+    Wraps an MSTMM ``System`` with one flexible element (the launch rail)
+    and its precomputed modes, and exposes the rail's mode-shape interpolation field.
     Phi_r, Phi_theta and their first/second spatial derivatives at an axial station x_R,
     projected into the global inertial frame K_I via A_IR.
 
@@ -90,7 +90,7 @@ class RailModalField:
         )
 
         logger.debug(
-            "RailModalField bound to element [%r] with %d modes.", elem_id, len(modes)
+            "GuideModalField bound to element [%r] with %d modes.", elem_id, len(modes)
         )
 
     @property

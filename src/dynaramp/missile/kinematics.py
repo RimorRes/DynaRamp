@@ -7,7 +7,7 @@ import numpy as np
 
 from ..common.types import Vector, VectorLike, Matrix
 from ..common.vecmath import skew_sym_mat, euler_zyx, small_rot
-from .modal_field import RailModalField, ModalShape
+from .modal_field import GuideModalField, ModalShape
 from .state import MissileState
 
 logger = logging.getLogger(__name__)
@@ -47,8 +47,8 @@ class MissileKinematics:
     of motion (section 3.3).
     """
 
-    def __init__(self, field: RailModalField):
-        self.field: RailModalField = field
+    def __init__(self, field: GuideModalField):
+        self.field: GuideModalField = field
 
     def evaluate(self, state: MissileState, p: VectorLike, p_dot: VectorLike) -> MissileKinematicState:
         """

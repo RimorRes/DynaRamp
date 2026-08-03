@@ -6,7 +6,7 @@ from typing import List
 
 import numpy as np
 
-from ..common.types import Vector, VectorLike, Matrix
+from ..common.types import VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +19,13 @@ class Slider:
 
     Attributes
     ----------
-    position : Vector
+    position : VectorLike
         B_r_O1Vi, the center Vi of the ball head relative to O1 (rear slider pair center),
         expressed in the body frame K_B. Constant.
     radius : float
         Ri, the radius of the ball head.
     """
-    position: Vector
+    position: VectorLike
     radius: float
 
     def __post_init__(self) -> None:
