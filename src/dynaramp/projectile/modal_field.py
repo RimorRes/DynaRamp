@@ -144,7 +144,7 @@ class GuideModalField:
             modes: List[Mode],
             a_ir: Matrix | None = None,
             step: float = 1e-4,
-    ) -> "GuideModalField":
+    ) -> GuideModalField:
         """
         Convenience constructor from an ordered sequence of element ids, one segment per
         element with its length read from the element. Equivalent to

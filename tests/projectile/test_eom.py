@@ -14,6 +14,8 @@ def _synthetic_kin(n=2, seed=0):
         a_ib=a_ib,
         omega_il=rng.standard_normal(3),
         omega_ib=rng.standard_normal(3),
+        r_o1=rng.standard_normal(3),
+        r_dot_o1=rng.standard_normal(3),
         l_to1=rng.standard_normal((3, n)),
         j_to1=rng.standard_normal((3, 6)),
         zeta_to1=rng.standard_normal(3),

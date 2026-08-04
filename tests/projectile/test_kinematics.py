@@ -129,3 +129,33 @@ def test_translational_acceleration_finite_difference(field):
              - 2 * _r_o1(field, x0, p0)
              + _r_o1(field, x0 - x_dot * dt, p0 - p_dot * dt)) / dt ** 2
     assert np.allclose(a_ana, a_num, atol=1e-4)
+
+
+def test_r_o1_matches_position_oracle(field):
+    # kin.r_o1 must equal the first-principles O1 position (same expression as the oracle).
+    n = field.n_modes
+    rng = np.random.default_rng(6)
+    p = 1e-3 * rng.standard_normal(n)
+    p_dot = 1e-3 * rng.standard_normal(n)
+    x = np.array([X0, 0.03, -0.02, 0.08, -0.05, 0.10])
+    st = ProjectileState.from_config_rates(x, np.zeros(6))
+    kin = ProjectileKinematics(field).evaluate(st, p, p_dot)
+    assert np.allclose(kin.r_o1, _r_o1(field, x, p))
+
+
+def test_r_dot_o1_matches_finite_difference(field):
+    # kin.r_dot_o1 must equal the central FD of the O1 position along a trajectory.
+    n = field.n_modes
+    rng = np.random.default_rng(7)
+    p0 = 1e-3 * rng.standard_normal(n)
+    p_dot = 1e-3 * rng.standard_normal(n)
+    x0 = np.array([X0, 0.03, -0.02, 0.08, -0.05, 0.10])
+    x_dot = np.array([1.4, 0.2, -0.15, 0.1, -0.07, 0.05])
+    y0 = h_matrix(x0[3], x0[4]) @ x_dot
+    st = ProjectileState(x0, y0)
+    kin = ProjectileKinematics(field).evaluate(st, p0, p_dot)
+
+    dt = 1e-6
+    v_num = (_r_o1(field, x0 + x_dot * dt, p0 + p_dot * dt)
+             - _r_o1(field, x0 - x_dot * dt, p0 - p_dot * dt)) / (2 * dt)
+    assert np.allclose(kin.r_dot_o1, v_num, atol=1e-6)
