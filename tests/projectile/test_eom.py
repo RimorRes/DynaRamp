@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from dynaramp.projectile import Projectile, ProjectileEOM, ProjectileKinematicState
 from dynaramp.common.vecmath import euler_zyx

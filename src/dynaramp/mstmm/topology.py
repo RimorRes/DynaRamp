@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Dict, Iterable
+from typing import Tuple, List, Dict, Iterable, cast
 
 import logging
 
@@ -242,6 +242,7 @@ class TopologyHandler:
             self._elem_port_type[tgt_id][port_idx] = PortType.OUTPUT
 
         # Create the root
+        port_idx = cast(int, port_idx)  # Port index is guaranteed to be an int at this point
         root_boundary = Boundary(b_id=f"{tgt_id}.{port_idx}_root", state_vector=boundary_sv)
         # Cache the new root
         self._root = root_boundary
@@ -294,6 +295,7 @@ class TopologyHandler:
             self._elem_port_type[tgt_id][port_idx] = PortType.INPUT
 
         # Create the tip boundary
+        port_idx = cast(int, port_idx)  # Port index is guaranteed to be an int at this point
         tip_boundary = Boundary(b_id=f"tip_{tgt_id}.{port_idx}", state_vector=boundary_sv)
         # Cache the new tip boundary
         self._tips[tip_boundary.b_id] = tip_boundary
@@ -541,6 +543,7 @@ class TopologyHandler:
             upstream_tips = [t for t in nx.ancestors(self._internal_graph, e_id) if t in self._tips]
 
             # Store the completed ElementInfo object
+            downstream = cast(EntityID, downstream)  # Downstream is guaranteed
             einfo = ElementInfo(obj, main_input_idx, ports, output_port, upstream_tips, downstream)
             self._einfo_cache[e_id] = einfo
 

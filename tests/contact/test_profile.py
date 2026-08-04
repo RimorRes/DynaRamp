@@ -4,7 +4,6 @@ import pytest
 from dynaramp.materials import Material, STEEL
 from dynaramp.contact import (
     linear_contact_stiffness,
-    SurfaceContact,
     GuideProfile,
     RailProfile,
     CanisterProfile,
