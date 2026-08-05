@@ -6,7 +6,7 @@ from typing import List
 
 import numpy as np
 
-from ..common.types import VectorLike, Matrix
+from ..common.types import Vector, VectorLike, Matrix
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class Slider:
     radius: float
 
     def __post_init__(self) -> None:
-        self.position = np.array(self.position, dtype=np.float64).reshape(3)
+        self.position: Vector = np.array(self.position, dtype=np.float64).reshape(3)
         self.radius = float(self.radius)
 
 

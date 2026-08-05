@@ -23,13 +23,16 @@ from dynaramp.projectile import GuideModalField, Projectile, Slider
 from dynaramp.contact import RailProfile, ContactSolver, linear_contact_stiffness
 from dynaramp.simulation import LaunchSimulator, Gravity, Thrust, G0
 
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 def build_rail() -> dyn.System:
     """A slender steel launch rail, modeled as an Euler-Bernoulli beam clamped at its base
     (x = 0) and free at the muzzle end (x = L)."""
     topo = dyn.TopologyHandler()
-    length = 2.5                      # rail length [m]
-    width, height = 0.04, 0.06        # cross-section [m]
+    length = 518 * 25.4e-3 # rail length [m]
+    width, height = 0.5, 1.0  # cross-section [m]
     beam = dyn.EulerBernoulliBeam(
         e_id="rail",
         length=length,
@@ -53,19 +56,30 @@ def build_rail() -> dyn.System:
 def main() -> None:
     # --- section 2: rail modal model ---
     system = build_rail()
-    modes = system.natural_modes(3, omega_max=1500, search_res=3000)
+    modes = system.natural_modes(7, omega_max=1500)
     field = GuideModalField.from_elements(system, ["rail"], modes)
     print(f"Rail modes retained: {len(modes)} "
           f"(frequencies: {', '.join(f'{m.frequency:.1f}' for m in modes)} rad/s)")
 
-    # --- the projectile: a ~60 kg sounding rocket, rear + front slider pairs ---
+    # --- the projectile: a ~Pathfinder sounding rocket, rear + front slider pairs ---
+    mass = 2468.1
+    r = 22 * 25.4e-3
+    h_rocket = 439 * 25.4e-3
+    inertia_xx = 1 / 2 * mass * r ** 2
+    inertia_yy = inertia_zz = 1 / 12 * mass * (3 * r ** 2 + h_rocket ** 2)
+    lug1 = (679.40 - 660.44) * 25.4e-3
+    lug2 = (679.40 - 533.94) * 25.4e-3
+    lug3 = (679.40 - 478.42) * 25.4e-3
+    lug4 = (679.40 - 358.16) * 25.4e-3
     rocket = Projectile(
-        mass=60.0,
-        inertia_com=np.diag([0.5, 22.0, 22.0]),   # roll light, pitch/yaw heavy
-        com_o1=(1.0, 0.0, 0.0),                    # COM 1 m ahead of the rear slider (O1)
+        mass=mass,
+        inertia_com=np.diag([inertia_xx, inertia_yy, inertia_zz]),   # roll light, pitch/yaw heavy
+        com_o1=(h_rocket/2, 0.0, 0.0),                    # COM roughly halfway up wrt the rear slider (O1)
         sliders=[
-            Slider((0.0, 0.0, 0.0), radius=0.0),   # rear shoe (at O1)
-            Slider((1.5, 0.0, 0.0), radius=0.0),   # front shoe, 1.5 m ahead
+            Slider((lug1, 0.0, 0.0), radius=0.0),  # rear-most shoe (at O1)
+            Slider((lug2, 0.0, 0.0), radius=0.0),
+            Slider((lug3, 0.0, 0.0), radius=0.0),
+            Slider((lug4, 0.0, 0.0), radius=0.0)  # front-most shoe
         ],
     )
 
@@ -80,18 +94,18 @@ def main() -> None:
     )
     # single rail exit at 2.5 m: the front shoe (station x_R+1.5) leaves first, then the rear
     # -- the sequential detachment that produces the launch disturbance.
-    solver = ContactSolver(field, profile, rocket.sliders, l_c=2.5)
+    solver = ContactSolver(field, profile, rocket.sliders, l_c=518 * 25.4e-3)
 
     # --- section 5: loads, simulator, run ---
     forces = [
         Gravity(g=(0.0, -G0, 0.0)),                       # rocket hangs; gravity seats the shoes on the groove
-        Thrust(curve=lambda t: 12000.0 * min(1.0, t / 0.01)),  # 12 kN motor, 10 ms ramp
+        Thrust(curve=lambda t: 285e3 * min(1.0, t / 0.1)),  # 250 kN motor, 100 ms ramp
     ]
     sim = LaunchSimulator(field, rocket, solver, forces=forces, rayleigh=(2.0, 1e-5))
 
     # start seated in the groove at the base, at rest.
-    x0 = np.array([0.2, 0.0, -5.5e-4, 0.0, 0.0, 0.0])     # [x_R, y_L, z_L, gamma, psi, phi]
-    result = sim.run(x0, np.zeros(6), dt=1e-4, t_max=0.25)
+    x0 = np.array([0.2, -5.5e-4, 0.0, 0.0, 0.0, 0.0])     # [x_R, y_L, z_L, gamma, psi, phi]
+    result = sim.run(x0, np.zeros(6), dt=1e-4, t_max=0.7)
 
     # --- report the initial disturbance ---
     print(f"\nSteps: {len(result.t)}   exited rail: {result.exited}")

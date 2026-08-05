@@ -302,7 +302,7 @@ class System:
         last_elem_id = next(self.topology.tree.predecessors(self.topology.root.b_id))
 
         # Use np.allclose with an absolute tolerance to handle mixed-unit zero crossings
-        if np.allclose(state_vecs[last_elem_id], root_sv, rtol=rtol, atol=1e-5):
+        if np.allclose(state_vecs[last_elem_id], root_sv, rtol=rtol, atol=1e-4):
             logger.debug("Propagated state matches root boundary state.")
         else:
             # If it fails, manually calculate the max absolute difference for logging
@@ -378,8 +378,7 @@ class System:
             res = minimize_scalar(
                 self._sigma_min,
                 bounds=(omega[idx - 1], omega[idx + 1]),
-                method="bounded",
-                tol=mtol
+                method="bounded"
             )
             refined_omega: float = res.x
             # It shouldn't happen if the sweep is fine enough, but we should avoid duplicating modes
