@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from dynaramp.projectile import Projectile, Slider, ProjectileState
 from dynaramp.common.vecmath import h_matrix, h_rotation_matrix

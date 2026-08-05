@@ -80,8 +80,8 @@ class ContactSolver:
         # canister exit, giving sequential detachment); a sequence sets an independent exit
         # per slider, so sliders can be made to detach simultaneously -- e.g. a rail groove
         # whose cross-section widens along its length, releasing rear and front sliders at
-        # once. `exit_stations[i]` is compared against slider i's axial station (Eq. 61).
-        if np.ndim(l_c) == 0:
+        # once. `exit_stations[i]` is compared against the i-th slider's axial station (Eq. 61).
+        if isinstance(l_c, (int, float)):
             self.exit_stations: List[float] = [float(l_c)] * len(self.sliders)
         else:
             self.exit_stations = [float(v) for v in l_c]

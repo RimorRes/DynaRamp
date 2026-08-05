@@ -154,8 +154,8 @@ class DiscreteElement(Element, ABC):
         # Truncate the state vectors to keep only the kinematics -> mode shape
         v = state_vector[0:6].reshape(6, 1).astype(np.float64)
 
-        # Generalized matrix multiplication
-        return np.float64(v.T @ self._m_param_mat @ v)
+        # Generalized matrix multiplication (extract the scalar from the 1x1 quadratic form)
+        return np.float64((v.T @ self._m_param_mat @ v).item())
 
     @property
     @abstractmethod
@@ -204,7 +204,7 @@ class ContinuousElement(Element, ABC):
             # Truncate the state vectors to keep only the kinematics -> mode shape
             v = state_at_x[0:6].reshape(6, 1)
 
-            return np.float64(v.T @ self._m_bar_param_mat @ v)
+            return np.float64((v.T @ self._m_bar_param_mat @ v).item())
 
         element_modal_mass, _ = integrate.quad(mass_integrand, 0.0, beam_len)
         return np.float64(element_modal_mass)
@@ -221,7 +221,7 @@ class MasslessMixin:
     def _m_param_mat(self) -> Matrix:
         return np.zeros((6, 6)).astype(np.float64)
 
-    _m_bar_param_mat: Matrix = _m_param_mat
+    _m_bar_param_mat = _m_param_mat
 
 
 @dataclass
