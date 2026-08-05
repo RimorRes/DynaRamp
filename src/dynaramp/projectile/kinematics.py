@@ -30,6 +30,8 @@ class ProjectileKinematicState:
     a_ib: Matrix         # 3x3  A_IB
     omega_il: Vector     # 3    I_omega_IL
     omega_ib: Vector     # 3    I_omega_IB
+    r_o1: Vector         # 3    I_r_O1     absolute position of O1
+    r_dot_o1: Vector     # 3    I_r_dot_O1 absolute velocity of O1
     l_to1: Matrix        # 3xn  translational, modal
     j_to1: Matrix        # 3x6  translational, quasi-velocity
     zeta_to1: Vector     # 3    translational convective term
@@ -122,11 +124,18 @@ class ProjectileKinematics:
         zeta_ro1 = zeta_rpp + w_il_skew @ a_il @ y[3:6]                             # Eq. 40
         omega_ib = l_rp @ p_dot + j_ro1 @ y                                         # Eq. 39
 
+        # Absolute position of O1: rigid axial term + rail deformation + lateral offset.
+        r_o1 = state.x_r * e_x + l_tp @ p + a_il @ l_rpo1
+        # Absolute velocity of O1 (Eq. 35): I_r_dot_O1 = L_TO1 p_dot + J_TO1 y.
+        r_dot_o1 = l_to1 @ p_dot + j_to1 @ y
+
         return ProjectileKinematicState(
             a_il=a_il.astype(np.float64),
             a_ib=a_ib.astype(np.float64),
             omega_il=omega_il.astype(np.float64),
             omega_ib=omega_ib.astype(np.float64),
+            r_o1=r_o1.astype(np.float64),
+            r_dot_o1=r_dot_o1.astype(np.float64),
             l_to1=l_to1.astype(np.float64),
             j_to1=j_to1.astype(np.float64),
             zeta_to1=zeta_to1.astype(np.float64),
