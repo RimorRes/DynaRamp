@@ -585,7 +585,7 @@ class System:
         # Add the root to the end of the dict
         state_vecs[topology.root.b_id] = root_sv
 
-        logger.info(f"Successfully computed internal states at {omega:.3e} rad/s.")
+        logger.debug(f"Successfully computed internal states at {omega:.3e} rad/s.")
 
         return state_vecs
 
@@ -699,7 +699,7 @@ class System:
             s = np.linalg.svd(self.overall_transfer_mat(refined_omega)[0], compute_uv=False)
             rcond = s[-1] / s[0]
 
-            logger.info(f"Mode candidate at {float(refined_omega):.3e} rad/s.")
+            logger.debug(f"Mode candidate at {float(refined_omega):.3e} rad/s.")
             logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
             # If rcond passes the tolerance, keep every eigenvector at this frequency --
             # the null space may be more than one-dimensional (a repeated eigenfrequency).
