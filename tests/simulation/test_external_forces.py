@@ -22,9 +22,9 @@ def _projectile(com=(0.0, 0.0, 0.0), mass=100.0):
 
 def test_gravity_force_and_moment():
     m, com = 100.0, np.array([0.5, 0.0, 0.0])
-    grav = Gravity()  # default (0, -g, 0)
+    grav = Gravity()  # NED default: down = +z -> (0, 0, g)
     q, mom = grav(_kin(), _projectile(com=com, mass=m), 0.0)
-    assert np.allclose(q, [0.0, -m * G0, 0.0])
+    assert np.allclose(q, [0.0, 0.0, m * G0])
     assert np.allclose(mom, skew_sym_mat(com) @ q)
 
 
@@ -34,11 +34,11 @@ def test_gravity_no_moment_when_com_at_o1():
 
 
 def test_gravity_rotates_with_frame_only_for_moment():
-    # Gravity direction is fixed in K_I; the lever arm rotates with the body.
+    # Gravity direction is fixed in K_I (NED down = +z); the lever arm rotates with the body.
     a_ib = euler_zyx(0.3, -0.2, 0.1)
     com = np.array([0.4, 0.1, -0.2])
     q, mom = Gravity()(_kin(a_ib), _projectile(com=com), 0.0)
-    assert np.allclose(q, [0.0, -100.0 * G0, 0.0])           # force unchanged
+    assert np.allclose(q, [0.0, 0.0, 100.0 * G0])            # force unchanged
     assert np.allclose(mom, skew_sym_mat(a_ib @ com) @ q)     # arm = A_IB * com
 
 

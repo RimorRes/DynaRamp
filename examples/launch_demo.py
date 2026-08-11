@@ -98,13 +98,13 @@ def main() -> None:
 
     # --- section 5: loads, simulator, run ---
     forces = [
-        Gravity(g=(0.0, -G0, 0.0)),                       # rocket hangs; gravity seats the shoes on the groove
+        Gravity(g=(0.0, 0.0, G0)),                        # NED down = +z; gravity seats the shoes on the groove floor
         Thrust(curve=lambda t: 285e3 * min(1.0, t / 0.1)),  # 250 kN motor, 100 ms ramp
     ]
     sim = LaunchSimulator(field, rocket, solver, forces=forces, rayleigh=(2.0, 1e-5))
 
-    # start seated in the groove at the base, at rest.
-    x0 = np.array([0.2, -5.5e-4, 0.0, 0.0, 0.0, 0.0])     # [x_R, y_L, z_L, gamma, psi, phi]
+    # start seated on the groove floor (+z, "down") at the base, at rest.
+    x0 = np.array([0.2, 0.0, 5.5e-4, 0.0, 0.0, 0.0])      # [x_R, y_L, z_L, gamma, psi, phi]
     result = sim.run(x0, np.zeros(6), dt=1e-4, t_max=0.7)
 
     # --- report the initial disturbance ---
@@ -114,7 +114,8 @@ def main() -> None:
               f"axial exit speed: {result.y[-1, 0]:.1f} m/s")
     g, psi, phi = np.degrees(result.attitude[-1])
     wx, wy, wz = np.degrees(result.angular_velocity[-1])
-    print(f"Exit attitude  [pitch, yaw, roll]: [{g:+.3f}, {psi:+.3f}, {phi:+.3f}] deg")
+    # NED z-y-x angles: gamma about +z = yaw, psi about +y = pitch, phi about +x = roll.
+    print(f"Exit attitude  [yaw, pitch, roll]: [{g:+.3f}, {psi:+.3f}, {phi:+.3f}] deg")
     print(f"Exit body rates              : [{wx:+.2f}, {wy:+.2f}, {wz:+.2f}] deg/s")
     print(f"Peak contact force on rocket : {float(np.max(np.linalg.norm(result.contact_force, axis=1))):.0f} N")
 
@@ -137,7 +138,7 @@ def _plot(result) -> None:
     ax[0, 0].set(title="Axial position along rail", xlabel="t [ms]", ylabel="x_R [m]")
 
     ax[0, 1].plot(t_ms, np.degrees(result.attitude))
-    ax[0, 1].legend(["pitch γ", "yaw ψ", "roll φ"])
+    ax[0, 1].legend(["yaw γ", "pitch ψ", "roll φ"])
     ax[0, 1].set(title="Attitude", xlabel="t [ms]", ylabel="[deg]")
 
     ax[1, 0].plot(t_ms, np.degrees(result.angular_velocity))

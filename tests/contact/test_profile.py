@@ -53,8 +53,8 @@ def test_rail_is_a_guide_profile():
 
 
 def test_rail_no_contact_within_clearances():
-    assert _rail().contacts(np.array([0.0, 0.5 * CLAT, 0.5 * CTOP])) == []
-    assert _rail().contacts(np.array([0.0, -0.5 * CLAT, -0.5 * CBOT])) == []
+    assert _rail().contacts(np.array([0.0, 0.5 * CLAT, 0.5 * CBOT])) == []    # +z within floor
+    assert _rail().contacts(np.array([0.0, -0.5 * CLAT, -0.5 * CTOP])) == []  # -z within lip
 
 
 def test_rail_side_faces():
@@ -71,19 +71,20 @@ def test_rail_side_faces():
 
 
 def test_rail_bottom_and_top_faces():
+    # NED: the bottom floor is the +z ("down") face; the top lip is the -z ("up") face.
     p = 4e-4
-    (c,) = _rail().contacts(np.array([0.0, 0.0, -(CBOT + p)]))
+    (c,) = _rail().contacts(np.array([0.0, 0.0, CBOT + p]))
     assert c.label == "bottom"
     assert np.isclose(c.penetration, p)
-    assert np.allclose(c.normal, [0, 0, 1])
+    assert np.allclose(c.normal, [0, 0, -1])   # floor reacts up (-z)
 
-    (c,) = _rail().contacts(np.array([0.0, 0.0, CTOP + p]))
+    (c,) = _rail().contacts(np.array([0.0, 0.0, -(CTOP + p)]))
     assert c.label == "top_lip"
-    assert np.allclose(c.normal, [0, 0, -1])
+    assert np.allclose(c.normal, [0, 0, 1])     # lip reacts down (+z)
 
 
 def test_rail_corner_two_faces():
-    cs = _rail().contacts(np.array([0.0, CLAT + 1e-4, -(CBOT + 1e-4)]))
+    cs = _rail().contacts(np.array([0.0, CLAT + 1e-4, CBOT + 1e-4]))
     labels = {c.label for c in cs}
     assert labels == {"side_+y", "bottom"}
 

@@ -18,8 +18,11 @@ class ProjectileState:
 
     Configuration
         x = [x_R, y_L, z_L, gamma, psi, phi]^T = [s_B; a_B]
-        with s_B the position coordinates of O1 (axial x_R, lateral y_L, z_L in K_L) and
-        a_B = [gamma, psi, phi] the pitch/yaw/roll z-y-x Euler angles.
+        with s_B the O1 position coordinates in K_L (axial x_R, lateral/right y_L, vertical/
+        down z_L) and a_B = [gamma, psi, phi] the intrinsic z-y-x Euler angles. In the NED
+        launch frame (+X forward, +Y right, +Z down) these are, physically, gamma = yaw
+        (about +z/down), psi = pitch (about +y/right) and phi = roll (about +x/forward). The
+        paper's own frame labels gamma/psi as pitch/yaw instead; the z-y-x math is identical.
     Quasi-velocity
         y = [x_R_dot, y_L_dot, z_L_dot, w1, w2, w3]^T = [s_B_dot; L_omega_LB]
         with L_omega_LB the angular velocity of K_B relative to K_L, expressed in K_L.

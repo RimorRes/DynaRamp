@@ -47,17 +47,21 @@ def skew_sym_mat(vec: VectorLike) -> Matrix:
 def euler_zyx(gamma: float, psi: float, phi: float) -> Matrix:
     """
     Rotation matrix A_LB transforming coordinates from the projectile body frame K_B
-    to the launch frame K_L, built from the z-y-x Euler angles of Eq. (23):
-    pitch gamma (about z), yaw psi (about y), roll phi (about x), applied intrinsically
-    in the order pitch -> yaw -> roll.
+    to the launch frame K_L, built from the intrinsic z-y-x Euler angles of Eq. (23):
+    gamma (about z), psi (about y), phi (about x), applied in the order gamma -> psi -> phi.
+
+    In the NED launch frame (+X forward, +Y right, +Z down) these are, physically, yaw
+    (gamma, about +z/down), pitch (psi, about +y/right) and roll (phi, about +x) -- the
+    standard aerospace 3-2-1 sequence. (The paper's own frame instead labels gamma/psi as
+    pitch/yaw; the matrix below is identical regardless of the axis naming.)
 
     Implemented with scipy's intrinsic 'ZYX' sequence, which is exactly
     A_LB = Rz(gamma) @ Ry(psi) @ Rx(phi). This convention is the one for which the
     Euler-rate-to-angular-velocity map reproduces H_R exactly (see `h_rotation_matrix`).
 
-    :param gamma: Pitch angle (rad), rotation about z.
-    :param psi: Yaw angle (rad), rotation about y.
-    :param phi: Roll angle (rad), rotation about x.
+    :param gamma: First Euler angle (rad), rotation about z (yaw in NED).
+    :param psi: Second Euler angle (rad), rotation about y (pitch in NED).
+    :param phi: Third Euler angle (rad), rotation about x (roll).
     :return: 3x3 rotation matrix A_LB (K_B -> K_L).
     """
     return Rotation.from_euler("ZYX", [gamma, psi, phi]).as_matrix().astype(np.float64)
@@ -143,3 +147,23 @@ def h_dot_matrix(gamma: float, psi: float, gamma_dot: float, psi_dot: float) -> 
     h_dot = np.zeros((6, 6), dtype=np.float64)
     h_dot[3:6, 3:6] = h_rotation_matrix_dot(gamma, psi, gamma_dot, psi_dot)
     return h_dot
+
+
+def block_rotation(dcm: Matrix) -> Matrix:
+    """
+    The 12x12 coordinate-transformation matrix H of the MSTMM (Rui, Transfer Matrix Method
+    for Multibody Systems, Eq. 15.103). It re-expresses a spatial state vector
+    Z = [r; theta; m; q] under a change of coordinate frame: it is block-diagonal, applying
+    the same 3x3 direction-cosine matrix `dcm` to each of the four 3-vector sub-blocks
+    (translation, rotation, moment, force):
+
+        H = blkdiag(D, D, D, D).
+
+    :param dcm: The 3x3 direction-cosine matrix D (e.g. a scipy Rotation's as_matrix()).
+    :return: 12x12 block-diagonal coordinate-transformation matrix.
+    """
+    d = np.asarray(dcm, dtype=np.float64)
+    h = np.zeros((12, 12), dtype=np.float64)
+    for i in range(4):
+        h[3 * i:3 * i + 3, 3 * i:3 * i + 3] = d
+    return h.astype(np.float64)

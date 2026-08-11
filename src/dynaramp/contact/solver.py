@@ -72,7 +72,11 @@ class ContactSolver:
         self.field = field
         self.profile = profile
         self.sliders = list(sliders)
-        self.a_ir = np.identity(3, dtype=np.float64) if a_ir is None else np.asarray(a_ir, dtype=np.float64)
+        # A_IR is a property of the guide, so it lives on the modal field. Default to the
+        # field's A_IR to keep the mode-shape projection and the contact-cross-section
+        # geometry in the same frame; an explicit a_ir here overrides it (advanced use).
+        self.a_ir = np.asarray(field.a_ir, dtype=np.float64) if a_ir is None \
+            else np.asarray(a_ir, dtype=np.float64)
         self.station_bracket = float(station_bracket)
 
         # Per-slider exit station: the axial station past which a slider disengages from the

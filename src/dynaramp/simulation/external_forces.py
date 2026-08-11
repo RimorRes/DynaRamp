@@ -43,10 +43,11 @@ class Gravity:
     Attributes
     ----------
     g : VectorLike
-        Gravitational acceleration vector in K_I [m/s^2]. Defaults to -y (the paper's +y-up
-        convention): (0, -9.80665, 0).
+        Gravitational acceleration vector in K_I [m/s^2]. Defaults to +z, the "down" axis of
+        the NED convention (+X forward, +Y right, +Z down): (0, 0, 9.80665). With the launcher
+        upright (A_IR = I) this seats the shoes on the rail-groove floor.
     """
-    g: VectorLike = (0.0, -G0, 0.0)
+    g: VectorLike = (0.0, 0.0, G0)
 
     def __call__(self, kin: ProjectileKinematicState, projectile: Projectile, t: float) -> Tuple[Vector, Vector]:
         g_i = np.asarray(self.g, dtype=np.float64)

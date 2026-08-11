@@ -67,15 +67,15 @@ def _kin(field, state, p, p_dot):
 
 def test_penetration_from_lateral_offset(field):
     n = field.n_modes
-    # O1 offset laterally by (y_L, z_L); no attitude, no deformation.
-    state = ProjectileState(np.array([3.0, 0.02, -0.008, 0.0, 0.0, 0.0]), np.zeros(6))
+    # O1 offset (y_L right, z_L down); no attitude, no deformation. NED: +z seats the floor.
+    state = ProjectileState(np.array([3.0, 0.02, 0.008, 0.0, 0.0, 0.0]), np.zeros(6))
     kin = _kin(field, state, np.zeros(n), np.zeros(n))
     slider = Slider(position=(0.5, 0.0, 0.0), radius=0.0)
     sc = evaluate_slider(kin, field, I3, np.zeros(n), np.zeros(n), slider, _rail(),
                          x_r=3.0, l_c=100.0)
     labels = {s.label: s.penetration for s in sc.surfaces}
     assert np.isclose(labels["side_+y"], 0.02 - 1e-3)     # |y| - lateral clearance
-    assert np.isclose(labels["bottom"], 0.008 - 1e-3)     # -z - bottom clearance
+    assert np.isclose(labels["bottom"], 0.008 - 1e-3)     # +z - bottom clearance (down)
 
 
 def test_newtons_third_law(field):
@@ -109,17 +109,17 @@ def test_impact_velocity_matches_finite_difference(field):
     # velocity must equal d(penetration)/dt from a central finite difference.
     n = field.n_modes
     slider = Slider(position=(0.5, 0.0, 0.0), radius=0.0)
-    x_dot = np.array([0.0, 0.5, 0.3, 0.0, 0.0, 0.0])   # pure lateral translation
+    x_dot = np.array([0.0, 0.5, 0.3, 0.0, 0.0, 0.0])   # pure lateral translation (right + down)
 
     def delta(t, label):
-        x = np.array([3.0, 0.02, -0.008, 0.0, 0.0, 0.0]) + x_dot * t
+        x = np.array([3.0, 0.02, 0.008, 0.0, 0.0, 0.0]) + x_dot * t
         st = ProjectileState.from_config_rates(x, x_dot)
         kin = _kin(field, st, np.zeros(n), np.zeros(n))
         sc = evaluate_slider(kin, field, I3, np.zeros(n), np.zeros(n), slider, _rail(),
                              x_r=x[0], l_c=100.0)
         return {s.label: s.penetration for s in sc.surfaces}[label]
 
-    st0 = ProjectileState.from_config_rates(np.array([3.0, 0.02, -0.008, 0.0, 0.0, 0.0]), x_dot)
+    st0 = ProjectileState.from_config_rates(np.array([3.0, 0.02, 0.008, 0.0, 0.0, 0.0]), x_dot)
     kin0 = _kin(field, st0, np.zeros(n), np.zeros(n))
     sc0 = evaluate_slider(kin0, field, I3, np.zeros(n), np.zeros(n), slider, _rail(),
                           x_r=3.0, l_c=100.0)

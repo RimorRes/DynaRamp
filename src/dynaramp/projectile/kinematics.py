@@ -12,6 +12,10 @@ from .state import ProjectileState
 
 logger = logging.getLogger(__name__)
 
+# Coordinate convention (NED): +X forward (axial), +Y right (lateral), +Z down (vertical).
+# The axial slide is x_R; the lateral/vertical O1 offsets are (y_L, z_L); the body attitude
+# uses the intrinsic z-y-x angles (gamma=yaw, psi=pitch, phi=roll) via `euler_zyx`.
+
 
 @dataclass(frozen=True)
 class ProjectileKinematicState:

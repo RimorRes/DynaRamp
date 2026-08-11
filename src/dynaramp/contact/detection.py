@@ -16,8 +16,9 @@ from .contact_model import normal_force, friction_force
 
 logger = logging.getLogger(__name__)
 
-# NOTE: coordinate convention (per the paper, Fig. 4): +x forward, +y up, +z right.
-# A move to NED is planned after end-to-end validation.
+# Coordinate convention (NED): +x forward, +y right, +z down. The cross-section frame K_Pi
+# shares these axes (up to the small bending rotation), so a slider's K_Pi (y, z) are its
+# lateral (right) and vertical (down) offsets, and gravity (+z) seats a shoe on the +z floor.
 
 
 @dataclass(frozen=True)

@@ -48,8 +48,11 @@ class SurfaceContact:
 class GuideProfile(ABC):
     """
     Cross-section contact model of a guide. Given a slider's reference point in the
-    cross-section frame K_Pi (origin on the guide central axis, x = axis normal, y/z the
-    principal cross-section axes), it returns the active contact faces.
+    cross-section frame K_Pi, it returns the active contact faces.
+
+    Coordinate convention (NED): x = the axial (forward) axis normal to the cross-section,
+    y = the lateral (right) axis, z = the vertical (down) axis. The cross-section plane is
+    therefore y-z, with +z pointing "down" so gravity seats a shoe onto the +z (floor) face.
     """
 
     @abstractmethod
@@ -67,8 +70,9 @@ class GuideProfile(ABC):
 class RailProfile(GuideProfile):
     """
     An open rail groove engaged by a (flat, T-profile) shoe: a rectangular clearance with
-    up to four flat faces -- two side walls (+/- y), a bottom floor (-z) and a top lip (+z).
-    The clearances are the half-play of the shoe reference point about the groove center
+    up to four flat faces -- two side walls (+/- y, lateral) and, along the vertical z axis
+    of the NED cross-section, a bottom floor (+z, "down") and a top lip (-z, "up"). The
+    clearances are the half-play of the shoe reference point about the groove center
     (K_Pi origin), i.e. they already fold in the shoe's own dimensions.
 
     Contact is conformal (flat), so the intended force model is exponent n = 1 with a
@@ -109,7 +113,7 @@ class RailProfile(GuideProfile):
         y, z = float(r_vi[1]), float(r_vi[2])
         out: List[SurfaceContact] = []
 
-        # Side walls (+/- y): contact when lateral offset exceeds the lateral clearance.
+        # Side walls (+/- y, lateral): contact when the lateral offset exceeds the clearance.
         d = y - self.lateral_clearance
         if d > 0.0:
             out.append(self._surface("side_+y", d, [0.0, -1.0, 0.0]))
@@ -117,15 +121,16 @@ class RailProfile(GuideProfile):
         if d > 0.0:
             out.append(self._surface("side_-y", d, [0.0, 1.0, 0.0]))
 
-        # Bottom floor (-z): the gravity-seated face; contact when the shoe drops past it.
-        d = -z - self.bottom_clearance
+        # Bottom floor (+z, "down" in NED): the gravity-seated face; contact when the shoe
+        # drops (+z) past it. The floor reacts back up (-z).
+        d = z - self.bottom_clearance
         if d > 0.0:
-            out.append(self._surface("bottom", d, [0.0, 0.0, 1.0]))
+            out.append(self._surface("bottom", d, [0.0, 0.0, -1.0]))
 
-        # Top lip (+z): contact when the shoe lifts against the rail lips.
-        d = z - self.top_clearance
+        # Top lip (-z, "up"): contact when the shoe lifts against the rail lips; reacts down (+z).
+        d = -z - self.top_clearance
         if d > 0.0:
-            out.append(self._surface("top_lip", d, [0.0, 0.0, -1.0]))
+            out.append(self._surface("top_lip", d, [0.0, 0.0, 1.0]))
 
         return out
 
@@ -133,10 +138,10 @@ class RailProfile(GuideProfile):
 class CanisterProfile(GuideProfile):
     """
     The paper's launch canister groove (Fig. 4), engaged by a spherical slider (ball head).
-    In the cross-section frame K_Pi, e^Pi_y is the vertical (side) axis and e^Pi_z the
-    lateral axis into the groove depth. The groove has two side walls (+/- y, clearance
-    clearance_y) and a bottom -- the deep radial wall at +z (clearance clearance_z) that the
-    slider is pressed into; it is open toward the missile on the -z side.
+    In the NED cross-section frame K_Pi, e^Pi_y is the lateral (side) axis and e^Pi_z the
+    vertical ("down") axis running into the groove depth. The groove has two side walls
+    (+/- y, clearance clearance_y) and a bottom -- the deep radial wall at +z (clearance
+    clearance_z) that the slider is pressed into; it is open on the -z ("up") side.
 
     The clearances are ball-surface-to-wall gaps (as drawn in Fig. 4c), so the ball radius
     is folded into them; the radius enters only the Hertzian stiffness (exponent n = 1.5,

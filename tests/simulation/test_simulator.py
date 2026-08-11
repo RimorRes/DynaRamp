@@ -67,14 +67,14 @@ def test_launch_runs_and_records(field):
 
 
 def test_free_fall_without_contact(field):
-    # Huge clearance -> no contact. Under gravity alone the projectile falls in -y.
+    # Huge clearance -> no contact. Under gravity alone the projectile falls in +z (NED down).
     proj = _projectile()
     solver = _solver(field, proj, clearance=1.0)
     sim = LaunchSimulator(field, proj, solver, forces=[Gravity()])
     res = sim.run(np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(6), dt=1e-3, t_max=1e-2)
-    assert res.x[-1, 1] < res.x[0, 1]                      # O1 dropped
+    assert res.x[-1, 2] > res.x[0, 2]                      # O1 dropped (+z is down)
     # near free-fall: dropped roughly 0.5 g t^2 (loose bound)
-    drop = res.x[0, 1] - res.x[-1, 1]
+    drop = res.x[-1, 2] - res.x[0, 2]
     assert 0 < drop < 0.5 * 9.81 * (1e-2) ** 2 * 2
 
 

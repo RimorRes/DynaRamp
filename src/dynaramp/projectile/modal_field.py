@@ -79,8 +79,10 @@ class GuideModalField:
     modes : List[Mode]
         Retained modes (from ``System.natural_modes``), in ascending frequency order.
     a_ir : VectorLike | None
-        3x3 rotation matrix A_IR from the reference frame K_R to the inertial frame K_I.
-        Defaults to the identity (launcher upright; rotation not yet wired in).
+        3x3 rotation matrix A_IR mapping the reference frame K_R to the inertial frame K_I
+        (the guide's absolute attitude, e.g. launcher elevation/azimuth). It projects every
+        mode-shape block into K_I and is consumed by the section 3 kinematics and section 4
+        contact analysis. Defaults to the identity (launcher upright / axes aligned with K_I).
     step : float
         Finite-difference step h for the spatial-derivative stencil (default 1e-4).
     """

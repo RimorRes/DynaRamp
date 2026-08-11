@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 class JunctionNode(MasslessMixin, DiscreteElement):
 
-    def __init__(self, e_id: EntityID):
-        super().__init__(e_id)
+    def __init__(self, e_id: EntityID, orientation: Matrix | None = None):
+        super().__init__(e_id, orientation)
 
-    def u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
+    def _u_local(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         return np.identity(12).astype(np.float64)
 
 
@@ -28,12 +28,15 @@ class SpatialElasticHinge(MasslessMixin, DiscreteElement):
             e_id: EntityID,
             k: Tuple[float, float, float],
             k_rot: Tuple[float, float, float],
+            orientation: Matrix | None = None,
     ):
         """
         :param k: Linear spring stiffnesses
         :param k_rot: Rotary spring torsional stiffnesses
+        :param orientation: Optional 3x3 direction-cosine matrix (local -> global)
+            giving the hinge's absolute orientation. The stiffness axes rotate with it.
         """
-        super().__init__(e_id)
+        super().__init__(e_id, orientation)
 
         k_mat = np.diag(- 1 / np.array(k))
         k_rot_mat = np.diag(1 / np.array(k_rot))
@@ -47,14 +50,14 @@ class SpatialElasticHinge(MasslessMixin, DiscreteElement):
             [np.zeros((6, 6)), np.identity(6)],
         ])
 
-    def u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
+    def _u_local(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         return self._u_mat.astype(np.float64)
 
 
 class LumpedMass(DiscreteElement):
 
-    def __init__(self, e_id: EntityID, mass: float):
-        super().__init__(e_id)
+    def __init__(self, e_id: EntityID, mass: float, orientation: Matrix | None = None):
+        super().__init__(e_id, orientation)
 
         self.mass = mass
         self._m_mat = np.block([
@@ -62,7 +65,7 @@ class LumpedMass(DiscreteElement):
             [np.zeros((3, 6))]
         ])
 
-    def u(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
+    def _u_local(self, input_pos: Vector, output_pos: Vector, omega: float) -> Matrix:
         u_mat = np.identity(12)
         u_mat[9:12, 0:3] = self.mass * omega**2 * np.identity(3)
         return u_mat.astype(np.float64)
@@ -83,21 +86,26 @@ class RigidBody(DiscreteElement):
             mass: float,
             inertia: Matrix,
             com: VectorLike = (0, 0, 0),
+            orientation: Matrix | None = None,
     ):
         """
 
         :param e_id: Unique element ID
         :param mass: Mass of the body
         :param inertia: Inertia with respect to the center of mass, in the body frame
-        :param com: Center of mass position with respect to the body's origin.
+        :param com: Center of mass position with respect to the body's origin,
+            expressed in the body (local) frame.
+        :param orientation: Optional 3x3 direction-cosine matrix (local -> global)
+            giving the body's absolute orientation. The local port geometry, com and
+            inertia are all interpreted in the body frame it defines.
         """
-        super().__init__(e_id)
+        super().__init__(e_id, orientation)
 
         self.mass = mass
         self.inertia = inertia
         self.com_pos = np.array(com)
 
-    def u(self, input_pos: VectorLike, output_pos: VectorLike, omega: float) -> Matrix:
+    def _u_local(self, input_pos: VectorLike, output_pos: VectorLike, omega: float) -> Matrix:
         input_pos_arr = np.array(input_pos, dtype=np.float64)
         output_pos_arr = np.array(output_pos, dtype=np.float64)
         # The vector FROM the input TO the output
@@ -141,8 +149,9 @@ class EulerBernoulliBeam(ContinuousElement):
             area: float,
             i_y: float,
             i_z: float,
+            orientation: Matrix | None = None,
     ):
-        super().__init__(e_id)
+        super().__init__(e_id, orientation)
 
         self.length = length
         self.rho = density
@@ -170,8 +179,7 @@ class EulerBernoulliBeam(ContinuousElement):
     def _krylov_v(z: float) -> float:
         return (np.sinh(z) - np.sin(z)) / 2
 
-    def u(self, input_pos: VectorLike, output_pos: VectorLike, omega: float) -> Matrix:
-        # TODO: Potentially broken logic here because of the fixed XYZ-LWH coordinate system
+    def _u_local(self, input_pos: VectorLike, output_pos: VectorLike, omega: float) -> Matrix:
         input_pos_arr = np.array(input_pos, dtype=np.float64)
         output_pos_arr = np.array(output_pos, dtype=np.float64)
         x, y, z = output_pos_arr - input_pos_arr
