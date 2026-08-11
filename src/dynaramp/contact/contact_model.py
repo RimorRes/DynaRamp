@@ -10,17 +10,35 @@ logger = logging.getLogger(__name__)
 
 def hertz_stiffness(radius: float, material_a: Material, material_b: Material) -> float:
     """
-    Generalized contact stiffness K for a sphere against a plane (Eqs. B13-B14):
+    Generalized contact stiffness for a sphere against a plane (Eqs. B13-B14).
 
-        K = 4 / (3 (sigma_a + sigma_b)) * sqrt(radius),   sigma_k = (1 - nu_k^2) / E_k.
+    ``K = 4 / (3 (sigma_a + sigma_b)) * sqrt(radius)``, with
+    ``sigma_k = (1 - nu_k^2) / E_k``.
 
-    :param radius: Ball-head radius R of the slider [m].
-    :param material_a: Material of one contacting body (e.g. the slider).
-    :param material_b: Material of the other (e.g. the guide).
-    :return: Generalized contact stiffness K.
+    Parameters
+    ----------
+    radius : float
+        Ball-head radius ``R`` of the slider [m].
+    material_a : Material
+        Material of one contacting body, e.g. the slider.
+    material_b : Material
+        Material of the other, e.g. the guide.
+
+    Returns
+    -------
+    float
+        The generalized contact stiffness ``K``. Intended for use with exponent
+        ``n = 1.5`` in :func:`normal_force`.
+
+    Raises
+    ------
+    ValueError
+        If ``radius`` is not positive.
     """
     if radius <= 0.0:
-        raise ValueError(f"radius must be positive, got {radius}.")
+        err_msg = f"radius must be positive, got {radius}."
+        logger.error(err_msg)
+        raise ValueError(err_msg)
     sigma = material_a.contact_sigma + material_b.contact_sigma
     return 4.0 / (3.0 * sigma) * float(np.sqrt(radius))
 
@@ -32,26 +50,51 @@ def linear_contact_stiffness(
         compliance_length: float,
 ) -> float:
     """
-    Contact stiffness for a flat (conformal) contact, modelled as the compression of a
-    material layer of nominal area `area` and characteristic depth `compliance_length`:
+    Contact stiffness for a flat (conformal) contact.
 
-        K = E* * area / compliance_length,   E* = 1 / (sigma_a + sigma_b).
+    Modeled as the compression of a material layer of nominal ``area`` and
+    characteristic depth ``compliance_length``:
 
-    Intended for use with exponent n = 1 in `normal_force` (units of K are N/m). Unlike the
-    Hertzian sphere-plane case there is no unique stiffness for conformal contact; the
-    compliance length is a modelling choice (roughly the depth of material that deforms).
-    Pick K large enough that the peak penetration stays a small fraction of the clearance.
+    ``K = E* * area / compliance_length``, with ``E* = 1 / (sigma_a + sigma_b)``.
 
-    :param area: Nominal contact area of the flat face [m^2].
-    :param material_a: Material of one contacting body.
-    :param material_b: Material of the other.
-    :param compliance_length: Characteristic elastic depth L [m].
-    :return: Linear contact stiffness K [N/m].
+    Parameters
+    ----------
+    area : float
+        Nominal contact area of the flat face [m^2].
+    material_a : Material
+        Material of one contacting body.
+    material_b : Material
+        Material of the other.
+    compliance_length : float
+        Characteristic elastic depth ``L`` [m].
+
+    Returns
+    -------
+    float
+        The linear contact stiffness ``K`` [N/m]. Intended for use with exponent
+        ``n = 1`` in :func:`normal_force`.
+
+    Raises
+    ------
+    ValueError
+        If ``area`` or ``compliance_length`` is not positive.
+
+    Notes
+    -----
+    Unlike the Hertzian sphere-plane case there is no unique stiffness for conformal
+    contact; the compliance length is a modeling choice, roughly the depth of material
+    that deforms. Pick ``K`` large enough that the peak penetration stays a small
+    fraction of the clearance, but no larger -- an over-stiff penalty makes an explicit
+    integrator's step size collapse.
     """
     if area <= 0.0:
-        raise ValueError(f"area must be positive, got {area}.")
+        err_msg = f"area must be positive, got {area}."
+        logger.error(err_msg)
+        raise ValueError(err_msg)
     if compliance_length <= 0.0:
-        raise ValueError(f"compliance_length must be positive, got {compliance_length}.")
+        err_msg = f"compliance_length must be positive, got {compliance_length}."
+        logger.error(err_msg)
+        raise ValueError(err_msg)
     e_star = 1.0 / (material_a.contact_sigma + material_b.contact_sigma)
     return e_star * area / compliance_length
 
@@ -65,23 +108,45 @@ def normal_force(
         exponent: float = 1.5,
 ) -> float:
     """
-    Continuous normal contact force with hysteresis damping (Lankarani-Nikravesh, Eq. B12):
+    Continuous normal contact force with hysteresis damping (Lankarani-Nikravesh, Eq. B12).
 
-        q_N = K delta^n [ 1 + (3 (1 - e^2) / 4) (delta_dot / delta_dot_minus) ].
+    ``q_N = K delta^n [1 + (3 (1 - e^2) / 4) (delta_dot / delta_dot_minus)]``.
 
-    Returns 0 when there is no penetration, and never returns a negative (adhesive) force.
-    When the impact velocity is zero (quasi-static contact) the damping term is dropped.
+    Parameters
+    ----------
+    penetration : float
+        ``delta``, relative penetration depth; positive in contact.
+    penetration_velocity : float
+        ``delta_dot``, relative penetration velocity; positive on approach.
+    impact_velocity : float
+        ``delta_dot_minus``, the penetration velocity at the onset of contact.
+    stiffness : float
+        ``K``, the generalized contact stiffness. See :func:`hertz_stiffness`.
+    restitution : float
+        ``e``, the coefficient of restitution, in [0, 1].
+    exponent : float
+        ``n``, the force-penetration exponent; 1.5 for a Hertzian sphere-plane contact.
 
-    :param penetration: delta, relative penetration depth (> 0 in contact).
-    :param penetration_velocity: delta_dot, relative penetration velocity (approach > 0).
-    :param impact_velocity: delta_dot_minus, penetration velocity at the onset of contact.
-    :param stiffness: K, generalized contact stiffness (see `hertz_stiffness`).
-    :param restitution: e, coefficient of restitution in [0, 1].
-    :param exponent: n, force-penetration exponent (1.5 for a Hertzian sphere-plane).
-    :return: Normal contact force magnitude q_N (>= 0).
+    Returns
+    -------
+    float
+        The normal contact force magnitude ``q_N``, never negative.
+
+    Raises
+    ------
+    ValueError
+        If ``restitution`` is outside [0, 1].
+
+    Notes
+    -----
+    Returns zero when there is no penetration, and never returns a negative (adhesive)
+    force. When the impact velocity is zero -- quasi-static contact -- the damping term
+    is dropped.
     """
     if not 0.0 <= restitution <= 1.0:
-        raise ValueError(f"restitution must be in [0, 1], got {restitution}.")
+        err_msg = f"restitution must be in [0, 1], got {restitution}."
+        logger.error(err_msg)
+        raise ValueError(err_msg)
     if penetration <= 0.0:
         return 0.0
 
@@ -95,10 +160,18 @@ def normal_force(
 
 def friction_force(normal_force_magnitude: float, friction_coefficient: float) -> float:
     """
-    Coulomb friction magnitude (Eq. B15): q_T = mu * q_N.
+    Coulomb friction magnitude (Eq. B15): ``q_T = mu * q_N``.
 
-    :param normal_force_magnitude: q_N, the normal contact force magnitude.
-    :param friction_coefficient: mu, the Coulomb friction coefficient.
-    :return: Friction force magnitude q_T.
+    Parameters
+    ----------
+    normal_force_magnitude : float
+        ``q_N``, the normal contact force magnitude.
+    friction_coefficient : float
+        ``mu``, the Coulomb friction coefficient.
+
+    Returns
+    -------
+    float
+        The friction force magnitude ``q_T``.
     """
     return friction_coefficient * normal_force_magnitude

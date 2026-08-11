@@ -7,6 +7,7 @@ from typing import List
 import numpy as np
 
 from ..common.types import Vector, VectorLike, Matrix
+from ..common.vecmath import parallel_axis
 
 logger = logging.getLogger(__name__)
 
@@ -14,16 +15,18 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Slider:
     """
-    A slider on the projectile: the spherical ball head that rides inside a guide.
-    Used by the section 4 slider-guide contact model.
+    A slider on the projectile: the ball head or shoe that rides inside a guide.
+
+    Consumed by the section 4 slider-guide contact model.
 
     Attributes
     ----------
     position : VectorLike
-        B_r_O1Vi, the center Vi of the ball head relative to O1 (rear slider pair center),
-        expressed in the body frame K_B. Constant.
+        ``B_r_O1Vi``, the center Vi of the ball head relative to O1 (the rear slider pair
+        center), expressed in the body frame K_B. Constant.
     radius : float
-        Ri, the radius of the ball head.
+        ``Ri``, the radius of the ball head. Zero for a flat shoe, whose dimensions are
+        folded into the guide's clearances instead.
     """
     position: VectorLike
     radius: float
@@ -38,22 +41,23 @@ class Projectile:
     """
     Rigid-body parameters of the projectile (section 3.3).
 
-    The projectile body frame K_B has its origin at O1, the center of the rear slider pair,
-    with x along the projectile symmetry axis toward the head. Inertia is supplied about the
-    center of mass and shifted to O1 on demand (parallel-axis), mirroring the convention
-    used by ``mstmm.element_lib.RigidBody``.
+    The projectile body frame K_B has its origin at O1, the center of the rear slider
+    pair, with x along the projectile symmetry axis toward the head. Inertia is supplied
+    about the center of mass and shifted to O1 on demand, mirroring the convention used
+    by :class:`dynaramp.mstmm.element_lib.RigidBody`.
 
     Attributes
     ----------
     mass : float
-        Total mass m of the projectile.
+        Total mass ``m`` of the projectile.
     inertia_com : Matrix
         3x3 inertia tensor about the center of mass C, in the body frame K_B.
     com_o1 : VectorLike
-        B_r_O1C, position of the center of mass C relative to O1, in K_B. Defaults to O1.
+        ``B_r_O1C``, position of the center of mass C relative to O1, in K_B. Defaults
+        to O1 itself.
     sliders : List[Slider]
-        Sliders distributed on the projectile (front/rear pairs, optionally a middle pair),
-        consumed by the section 4 contact model.
+        Sliders distributed along the projectile -- front and rear pairs, optionally a
+        middle pair -- consumed by the section 4 contact model.
     """
     mass: float
     inertia_com: Matrix
@@ -68,9 +72,9 @@ class Projectile:
     @property
     def inertia_o1(self) -> Matrix:
         """
-        Body-frame inertia tensor about O1, obtained from ``inertia_com`` by the
-        parallel-axis theorem: I_O1 = I_C + m (|r|^2 I3 - r r^T), with r = B_r_O1C.
+        Body-frame inertia tensor about O1.
+
+        Obtained from :attr:`inertia_com` by the parallel-axis theorem,
+        ``I_O1 = I_C + m (|r|^2 I3 - r r^T)`` with ``r = B_r_O1C``.
         """
-        r = self.com_o1
-        shift = self.mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
-        return (self.inertia_com + shift).astype(np.float64)
+        return parallel_axis(self.inertia_com, self.mass, self.com_o1)

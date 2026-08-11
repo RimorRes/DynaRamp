@@ -4,9 +4,12 @@ from .contact_model import (
     normal_force,
     friction_force,
 )
-from .profile import SurfaceContact, GuideProfile, RailProfile, CanisterProfile, StationVaryingProfile
+from .profile import (
+    SurfaceContact, GuideProfile, UniformProfile,
+    RailProfile, CanisterProfile, StationVaryingProfile,
+)
 from .detection import SliderContact, contact_station, evaluate_slider
-from .solver import ContactSolver, ContactResult, GuideReaction
+from .solver import ContactSolver, ContactResult, ContactMemory, GuideReaction
 
 __all__ = [
     "hertz_stiffness",
@@ -15,6 +18,7 @@ __all__ = [
     "friction_force",
     "SurfaceContact",
     "GuideProfile",
+    "UniformProfile",
     "RailProfile",
     "CanisterProfile",
     "StationVaryingProfile",
@@ -23,5 +27,6 @@ __all__ = [
     "evaluate_slider",
     "ContactSolver",
     "ContactResult",
+    "ContactMemory",
     "GuideReaction",
 ]

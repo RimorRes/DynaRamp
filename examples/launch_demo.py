@@ -25,7 +25,10 @@ from dynaramp.simulation import LaunchSimulator, Gravity, Thrust, G0
 
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+# INFO gives the mode summary and run progress. Drop to DEBUG for per-frequency
+# transfer-matrix detail, which is verbose enough to dominate the runtime.
+logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)-30s %(message)s")
+
 
 def build_rail() -> dyn.System:
     """A slender steel launch rail, modeled as an Euler-Bernoulli beam clamped at its base

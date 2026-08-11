@@ -83,7 +83,21 @@ class ProjectileState:
     # --- x <-> y conversions via H ---
     @classmethod
     def from_config_rates(cls, x: VectorLike, x_dot: VectorLike) -> "ProjectileState":
-        """Build a state from configuration x and configuration rates x_dot, via y = H x_dot."""
+        """
+        Build a state from configuration and configuration rates, via ``y = H x_dot``.
+
+        Parameters
+        ----------
+        x : VectorLike
+            Configuration ``[x_R, y_L, z_L, gamma, psi, phi]``.
+        x_dot : VectorLike
+            Configuration rates.
+
+        Returns
+        -------
+        ProjectileState
+            The state, with its quasi-velocity derived from the rates.
+        """
         x = np.array(x, dtype=np.float64).reshape(6)
         x_dot = np.array(x_dot, dtype=np.float64).reshape(6)
         y = h_matrix(x[3], x[4]) @ x_dot
@@ -91,8 +105,18 @@ class ProjectileState:
 
     def config_rates(self) -> Vector:
         """
-        Recover the configuration rates x_dot from y by inverting H:
-        x_dot = [s_B_dot; H_R^{-1} L_omega_LB]. Singular at psi = +/- pi/2 (gimbal lock).
+        Recover the configuration rates from the quasi-velocity by inverting ``H``.
+
+        ``x_dot = [s_B_dot; H_R^{-1} L_omega_LB]``.
+
+        Returns
+        -------
+        Vector
+            The 6 configuration rates.
+
+        Notes
+        -----
+        Singular at ``psi = +/- pi/2`` (gimbal lock), where ``H_R`` loses rank.
         """
         x_dot = np.empty(6, dtype=np.float64)
         x_dot[0:3] = self.y[0:3]

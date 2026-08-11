@@ -1,7 +1,7 @@
 from .modal_field import GuideModalField, GuideSegment, ModalShape
 from .projectile import Projectile, Slider
 from .state import ProjectileState
-from .kinematics import ProjectileKinematics, ProjectileKinematicState
+from .kinematics import ProjectileKinematics, ProjectileKinematicState, cross_section_frame
 from .dynamics import ProjectileEOM
 
 __all__ = [
@@ -13,5 +13,6 @@ __all__ = [
     "ProjectileState",
     "ProjectileKinematics",
     "ProjectileKinematicState",
+    "cross_section_frame",
     "ProjectileEOM",
 ]

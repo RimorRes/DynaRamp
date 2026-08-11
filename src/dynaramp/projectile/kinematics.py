@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 
 from dataclasses import dataclass
+from typing import Tuple
 
 import numpy as np
 
@@ -16,41 +17,124 @@ logger = logging.getLogger(__name__)
 # The axial slide is x_R; the lateral/vertical O1 offsets are (y_L, z_L); the body attitude
 # uses the intrinsic z-y-x angles (gamma=yaw, psi=pitch, phi=roll) via `euler_zyx`.
 
+# Constant selector matrices picking components out of the quasi-velocity y. Built once:
+# they were previously rebuilt on every kinematic evaluation, four times per integration
+# step.
+# [1 0 0 0 0 0] picks the axial slide rate (Eqs. 31, 33).
+_SEL_AXIAL = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+_SEL_AXIAL.setflags(write=False)
+# [0 | e_y | e_z | 0 | 0 | 0] picks (y_L_dot, z_L_dot) (Eq. 37).
+_SEL_LATERAL = np.zeros((3, 6))
+_SEL_LATERAL[1, 1] = 1.0
+_SEL_LATERAL[2, 2] = 1.0
+_SEL_LATERAL.setflags(write=False)
+# [O3 | I3] picks L_omega_LB (Eq. 40).
+_SEL_OMEGA = np.zeros((3, 6))
+_SEL_OMEGA[0:3, 3:6] = np.identity(3)
+_SEL_OMEGA.setflags(write=False)
+
+
+def cross_section_frame(a_ir: Matrix, phi_theta: Matrix, p: Vector) -> Tuple[Matrix, Vector]:
+    """
+    Attitude of a deformed cross-section of the guide.
+
+    The guide's bending rotates each cross-section by a small angle ``theta_RP``, read
+    off the rotational mode shapes at that station (Eq. 19). The section's frame is the
+    reference frame carried through that small rotation (Eqs. 18, 29):
+
+        ``theta_RP = A_IR^T (Phi_theta p)``,   ``A = A_IR (I + skew(theta_RP))``.
+
+    The same construction serves the launch cross-section in the section 3 kinematics
+    and the contact cross-section in the section 4 contact analysis, which is why it
+    lives here rather than in either of them.
+
+    Parameters
+    ----------
+    a_ir : Matrix
+        Rotation ``A_IR`` from the guide reference frame K_R to the inertial frame K_I.
+    phi_theta : Matrix
+        Rotational mode shapes at the station, ``3 x n``, projected in K_I.
+    p : Vector
+        Guide modal coordinates.
+
+    Returns
+    -------
+    tuple
+        ``(a_section, theta_rp)``: the section's 3x3 attitude in K_I, and the small
+        rotation itself expressed in K_R.
+    """
+    theta_rp = a_ir.T @ (phi_theta @ p)
+    return a_ir @ small_rot(theta_rp), theta_rp
+
 
 @dataclass(frozen=True)
 class ProjectileKinematicState:
     """
-    Result of the section 3.1-3.2 kinematic analysis at one instant, all projected in the
-    inertial frame K_I. The influence blocks map the launch-vehicle modal rates (p_dot,
-    p_ddot) and the projectile quasi-velocity (y, y_dot) to the absolute velocity/acceleration
-    of O1 and the absolute angular velocity/acceleration of the projectile body K_B:
+    Result of the section 3.1-3.2 kinematic analysis at one instant, projected in K_I.
 
-        I_r_dot_O1  = L_TO1 p_dot  + J_TO1 y
-        I_r_ddot_O1 = L_TO1 p_ddot + J_TO1 y_dot + zeta_TO1
-        I_omega_IB  = L_RP  p_dot  + J_RO1 y
-        I_omega_dot_IB = L_RP p_ddot + J_RO1 y_dot + zeta_RO1
+    The influence blocks map the launch-vehicle modal rates (``p_dot``, ``p_ddot``) and
+    the projectile quasi-velocity (``y``, ``y_dot``) to the absolute velocity and
+    acceleration of O1 and the absolute angular velocity and acceleration of the
+    projectile body frame K_B:
+
+        ``I_r_dot_O1  = L_TO1 p_dot  + J_TO1 y``
+        ``I_r_ddot_O1 = L_TO1 p_ddot + J_TO1 y_dot + zeta_TO1``
+        ``I_omega_IB  = L_RP  p_dot  + J_RO1 y``
+        ``I_omega_dot_IB = L_RP p_ddot + J_RO1 y_dot + zeta_RO1``
+
+    Attributes
+    ----------
+    a_il : Matrix
+        3x3 ``A_IL`` (equal to ``A_IP``), attitude of the launch cross-section.
+    a_ib : Matrix
+        3x3 ``A_IB``, attitude of the projectile body frame.
+    omega_il : Vector
+        ``I_omega_IL``, angular velocity of the launch cross-section.
+    omega_ib : Vector
+        ``I_omega_IB``, angular velocity of the projectile body.
+    r_o1 : Vector
+        ``I_r_O1``, absolute position of O1.
+    r_dot_o1 : Vector
+        ``I_r_dot_O1``, absolute velocity of O1.
+    l_to1 : Matrix
+        ``3 x n`` translational modal influence block.
+    j_to1 : Matrix
+        ``3 x 6`` translational quasi-velocity influence block.
+    zeta_to1 : Vector
+        Translational convective term.
+    l_rp : Matrix
+        ``3 x n`` rotational modal influence block, equal to ``Phi_theta``.
+    j_ro1 : Matrix
+        ``3 x 6`` rotational quasi-velocity influence block.
+    zeta_ro1 : Vector
+        Rotational convective term.
     """
-    a_il: Matrix         # 3x3  A_IL (== A_IP)
-    a_ib: Matrix         # 3x3  A_IB
-    omega_il: Vector     # 3    I_omega_IL
-    omega_ib: Vector     # 3    I_omega_IB
-    r_o1: Vector         # 3    I_r_O1     absolute position of O1
-    r_dot_o1: Vector     # 3    I_r_dot_O1 absolute velocity of O1
-    l_to1: Matrix        # 3xn  translational, modal
-    j_to1: Matrix        # 3x6  translational, quasi-velocity
-    zeta_to1: Vector     # 3    translational convective term
-    l_rp: Matrix         # 3xn  rotational, modal (== Phi_theta, i.e. L_RP)
-    j_ro1: Matrix        # 3x6  rotational, quasi-velocity
-    zeta_ro1: Vector     # 3    rotational convective term
+    a_il: Matrix
+    a_ib: Matrix
+    omega_il: Vector
+    omega_ib: Vector
+    r_o1: Vector
+    r_dot_o1: Vector
+    l_to1: Matrix
+    j_to1: Matrix
+    zeta_to1: Vector
+    l_rp: Matrix
+    j_ro1: Matrix
+    zeta_ro1: Vector
 
 
 class ProjectileKinematics:
     """
     Kinematics of the projectile within the bending launch rail (sections 3.1-3.2).
 
-    Depends only on the rail modal field (the section 2 -> 3 seam) and the projectile's
-    generalized state; it needs no inertial properties, which enter only in the equations
-    of motion (section 3.3).
+    Depends only on the rail modal field -- the section 2 to 3 seam -- and the
+    projectile's generalized state; it needs no inertial properties, which enter only in
+    the equations of motion (section 3.3).
+
+    Parameters
+    ----------
+    field : GuideModalField
+        The guide's modal field.
     """
 
     def __init__(self, field: GuideModalField):
@@ -58,8 +142,21 @@ class ProjectileKinematics:
 
     def evaluate(self, state: ProjectileState, p: VectorLike, p_dot: VectorLike) -> ProjectileKinematicState:
         """
-        Assemble the influence blocks at the current state and launch-vehicle modal
-        coordinates p and rates p_dot.
+        Assemble the influence blocks at the current state.
+
+        Parameters
+        ----------
+        state : ProjectileState
+            The projectile's generalized configuration and quasi-velocity.
+        p : VectorLike
+            Launch-vehicle modal coordinates.
+        p_dot : VectorLike
+            Launch-vehicle modal rates.
+
+        Returns
+        -------
+        ProjectileKinematicState
+            The assembled kinematic state.
         """
         shape = self.field.evaluate(state.x_r)
         p = np.asarray(p, dtype=np.float64)
@@ -74,23 +171,38 @@ class ProjectileKinematics:
             p: Vector,
             p_dot: Vector,
     ) -> ProjectileKinematicState:
+        """
+        Build the kinematic state from an evaluated modal field.
+
+        Parameters
+        ----------
+        shape : ModalShape
+            The guide's modal field at the projectile's axial station.
+        a_ir : Matrix
+            Rotation ``A_IR`` from K_R to K_I.
+        state : ProjectileState
+            The projectile's generalized configuration and quasi-velocity.
+        p, p_dot : Vector
+            Launch-vehicle modal coordinates and rates.
+
+        Returns
+        -------
+        ProjectileKinematicState
+            The assembled kinematic state.
+        """
         y = state.y
         v = state.v_p_prime               # v_P' = x_R_dot
         e_x = a_ir[:, 0]                   # a_ir @ [1, 0, 0]: axial unit vector in K_I
 
-        # Selector row [1 0 0 0 0 0] picking the axial slide rate out of y (Eqs. 31, 33).
-        sel_axial = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
         # --- Launch cross-section / point P' (Eqs. 15-21, 30-33) ---
-        theta_rp = a_ir.T @ (shape.phi_theta @ p)         # R_theta_RP (Eq. 19)
-        a_il = a_ir @ small_rot(theta_rp)                 # A_IP = A_IL (Eqs. 18, 29)
+        a_il, _ = cross_section_frame(a_ir, shape.phi_theta, p)   # A_IP = A_IL (Eqs. 18, 29)
 
         ir1 = e_x + shape.phi_r_d1 @ p                    # I_r'_P'   (Eq. 31)
         l_tp = shape.phi_r                                # L_TP      (Eq. 31)
         l_rp = shape.phi_theta                            # L_RP      (Eq. 33)
-        j_tpp = np.outer(ir1, sel_axial)                  # J_TP'     (Eq. 31)
+        j_tpp = np.outer(ir1, _SEL_AXIAL)                 # J_TP'     (Eq. 31)
         itheta1 = shape.phi_theta_d1 @ p                  # I_theta'_P'
-        j_rpp = np.outer(itheta1, sel_axial)              # J_RP'     (Eq. 33)
+        j_rpp = np.outer(itheta1, _SEL_AXIAL)             # J_RP'     (Eq. 33)
         zeta_tpp = 2 * v * (shape.phi_r_d1 @ p_dot) + v ** 2 * (shape.phi_r_d2 @ p)      # zeta_TP' (Eq. 31)
         zeta_rpp = 2 * v * (shape.phi_theta_d1 @ p_dot) + v ** 2 * (shape.phi_theta_d2 @ p)  # zeta_RP' (Eq. 33)
         omega_il = l_rp @ p_dot + j_rpp @ y               # I_omega_IL (Eq. 32)
@@ -103,20 +215,10 @@ class ProjectileKinematics:
         l_rpo1_dot = np.array([0.0, y[1], y[2]])          # L_r_dot_P'O1 = [0, y_L_dot, z_L_dot]
         lr_skew = skew_sym_mat(l_rpo1)
 
-        # Selector [0 | e_y | e_z | 0 | 0 | 0] picking (y_L_dot, z_L_dot) out of y (Eq. 37).
-        sel_lateral = np.zeros((3, 6))
-        sel_lateral[1, 1] = 1.0
-        sel_lateral[2, 2] = 1.0
-        # Selector [O3 | I3] picking L_omega_LB out of y (Eq. 40).
-        sel_omega = np.zeros((3, 6))
-        sel_omega[0, 3] = 1.0
-        sel_omega[1, 4] = 1.0
-        sel_omega[2, 5] = 1.0
-
         w_il_skew = skew_sym_mat(omega_il)
 
         l_to1 = l_tp - a_il @ lr_skew @ l_rp                                        # Eq. 36
-        j_to1 = j_tpp + a_il @ sel_lateral - a_il @ lr_skew @ j_rpp                 # Eq. 37
+        j_to1 = j_tpp + a_il @ _SEL_LATERAL - a_il @ lr_skew @ j_rpp                # Eq. 37
         zeta_to1 = (
             zeta_tpp
             - a_il @ lr_skew @ zeta_rpp
@@ -124,7 +226,7 @@ class ProjectileKinematics:
             + w_il_skew @ w_il_skew @ a_il @ l_rpo1
         )                                                                          # Eq. 38
 
-        j_ro1 = j_rpp + a_il @ sel_omega                                            # Eq. 40
+        j_ro1 = j_rpp + a_il @ _SEL_OMEGA                                           # Eq. 40
         zeta_ro1 = zeta_rpp + w_il_skew @ a_il @ y[3:6]                             # Eq. 40
         omega_ib = l_rp @ p_dot + j_ro1 @ y                                         # Eq. 39
 
@@ -134,16 +236,16 @@ class ProjectileKinematics:
         r_dot_o1 = l_to1 @ p_dot + j_to1 @ y
 
         return ProjectileKinematicState(
-            a_il=a_il.astype(np.float64),
-            a_ib=a_ib.astype(np.float64),
-            omega_il=omega_il.astype(np.float64),
-            omega_ib=omega_ib.astype(np.float64),
-            r_o1=r_o1.astype(np.float64),
-            r_dot_o1=r_dot_o1.astype(np.float64),
-            l_to1=l_to1.astype(np.float64),
-            j_to1=j_to1.astype(np.float64),
-            zeta_to1=zeta_to1.astype(np.float64),
-            l_rp=l_rp.astype(np.float64),
-            j_ro1=j_ro1.astype(np.float64),
-            zeta_ro1=zeta_ro1.astype(np.float64),
+            a_il=a_il,
+            a_ib=a_ib,
+            omega_il=omega_il,
+            omega_ib=omega_ib,
+            r_o1=r_o1,
+            r_dot_o1=r_dot_o1,
+            l_to1=l_to1,
+            j_to1=np.asarray(j_to1, dtype=np.float64),
+            zeta_to1=zeta_to1,
+            l_rp=l_rp,
+            j_ro1=np.asarray(j_ro1, dtype=np.float64),
+            zeta_ro1=zeta_ro1,
         )

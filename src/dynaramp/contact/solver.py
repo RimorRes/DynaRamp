@@ -9,6 +9,7 @@ import numpy as np
 from ..common.types import Vector, Matrix
 from ..projectile.kinematics import ProjectileKinematicState
 from ..projectile.modal_field import GuideModalField
+from ..projectile.projectile import Slider
 from .profile import GuideProfile
 from .detection import SliderContact, evaluate_slider
 
@@ -20,7 +21,18 @@ ContactMemory = Dict[int, Dict[str, float]]
 
 @dataclass(frozen=True)
 class GuideReaction:
-    """Contact reaction on the guide from one slider, for the section 5 modal projection."""
+    """
+    Contact reaction on the guide from one slider, for the section 5 modal projection.
+
+    Attributes
+    ----------
+    x_r_i : float
+        Axial station of the contact cross-section.
+    i_q_pi : Vector
+        Reaction force on the guide at that station, in K_I.
+    i_m_pi : Vector
+        Reaction moment on the guide at that station, in K_I.
+    """
     x_r_i: float
     i_q_pi: Vector
     i_m_pi: Vector
@@ -33,16 +45,19 @@ class ContactResult:
 
     Attributes
     ----------
-    sum_q_o1, sum_m_o1 : Vector
-        Total contact force and moment on the projectile at O1 (the Sigma terms of
-        Eqs. 69-70 that section 5 adds to h_T and h_R).
+    sum_q_o1 : Vector
+        Total contact force on the projectile at O1 -- the Sigma term of Eq. 69 that
+        section 5 adds to ``h_T``.
+    sum_m_o1 : Vector
+        Total contact moment on the projectile at O1 -- the Sigma term of Eq. 70 that
+        section 5 adds to ``h_R``.
     guide_reactions : List[GuideReaction]
-        Per-slider reactions on the guide (force, moment, station), which section 5 projects
-        onto the launch-vehicle modes to build f_g.
+        Per-slider reactions on the guide, which section 5 projects onto the
+        launch-vehicle modes to build ``f_g``.
     memory : ContactMemory
-        Updated impact-onset velocity memory to carry to the next time step.
+        Updated impact-onset velocity memory, to carry to the next time step.
     slider_contacts : List[SliderContact]
-        Per-slider detail, in slider order, for inspection/plotting.
+        Per-slider detail, in slider order, for inspection and plotting.
     """
     sum_q_o1: Vector
     sum_m_o1: Vector
@@ -53,38 +68,56 @@ class ContactResult:
 
 class ContactSolver:
     """
-    Orchestrates the section 4 contact analysis over all sliders of a projectile against a
-    single guide profile, summing the resultants and threading the impact-velocity memory.
+    Runs the section 4 contact analysis over all sliders against one guide profile.
 
-    The solver is stateless: `evaluate` takes the previous memory and returns the updated
-    one, so the time integrator (section 5) owns the state.
+    Sums the resultants and threads the impact-velocity memory. The solver is stateless:
+    :meth:`evaluate` takes the previous memory and returns the updated one, so the time
+    integrator (section 5) owns the state.
+
+    Parameters
+    ----------
+    field : GuideModalField
+        The guide modal field.
+    profile : GuideProfile
+        The guide cross-section contact model.
+    sliders : Sequence[Slider]
+        The projectile's sliders, in order.
+    a_ir : Matrix | None
+        Rotation ``A_IR`` from K_R to K_I. ``A_IR`` is a property of the guide, so it
+        lives on the modal field; this defaults to the field's own value to keep the
+        mode-shape projection and the contact-cross-section geometry in the same frame.
+        An explicit value here overrides it (advanced use).
+    l_c : float | Sequence[float]
+        Per-slider exit station: the axial station past which a slider disengages from
+        the guide (Eq. 61, generalized). A scalar applies to all sliders -- the paper's
+        single canister exit, giving sequential detachment. A sequence sets an
+        independent exit per slider, so sliders can be made to detach simultaneously,
+        e.g. a rail groove whose cross-section widens along its length, releasing rear
+        and front sliders at once.
+    station_bracket : float
+        Bracket size for the contact-station root find.
+
+    Raises
+    ------
+    ValueError
+        If ``l_c`` is a sequence whose length does not match the slider count.
     """
 
     def __init__(
             self,
             field: GuideModalField,
             profile: GuideProfile,
-            sliders: Sequence,
+            sliders: Sequence[Slider],
             a_ir: Matrix | None = None,
             l_c: float | Sequence[float] = np.inf,
             station_bracket: float = 0.5,
     ):
         self.field = field
         self.profile = profile
-        self.sliders = list(sliders)
-        # A_IR is a property of the guide, so it lives on the modal field. Default to the
-        # field's A_IR to keep the mode-shape projection and the contact-cross-section
-        # geometry in the same frame; an explicit a_ir here overrides it (advanced use).
-        self.a_ir = np.asarray(field.a_ir, dtype=np.float64) if a_ir is None \
-            else np.asarray(a_ir, dtype=np.float64)
+        self.sliders: List[Slider] = list(sliders)
+        self.a_ir: Matrix = field.a_ir if a_ir is None else a_ir
         self.station_bracket = float(station_bracket)
 
-        # Per-slider exit station: the axial station past which a slider disengages from the
-        # guide (Eq. 61, generalized). A scalar applies to all sliders (the paper's single
-        # canister exit, giving sequential detachment); a sequence sets an independent exit
-        # per slider, so sliders can be made to detach simultaneously -- e.g. a rail groove
-        # whose cross-section widens along its length, releasing rear and front sliders at
-        # once. `exit_stations[i]` is compared against the i-th slider's axial station (Eq. 61).
         if isinstance(l_c, (int, float)):
             self.exit_stations: List[float] = [float(l_c)] * len(self.sliders)
         else:
@@ -104,8 +137,25 @@ class ContactSolver:
             memory: ContactMemory | None = None,
     ) -> ContactResult:
         """
-        Evaluate all sliders at the current state and return the summed resultants plus the
-        updated memory. `memory` is the previous step's onset-velocity memory (or None).
+        Evaluate all sliders at the current state.
+
+        Parameters
+        ----------
+        kin : ProjectileKinematicState
+            Section 3 kinematics at O1.
+        x_r : float
+            Axial coordinate of O1.
+        p : Vector
+            Launch-vehicle modal coordinates.
+        p_dot : Vector
+            Launch-vehicle modal rates.
+        memory : ContactMemory | None
+            The previous step's onset-velocity memory.
+
+        Returns
+        -------
+        ContactResult
+            The summed resultants, the per-slider detail, and the updated memory.
         """
         memory = memory or {}
         sum_q = np.zeros(3, dtype=np.float64)

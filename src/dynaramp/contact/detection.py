@@ -2,15 +2,16 @@ from __future__ import annotations
 import logging
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 from scipy.optimize import brentq
 
 from ..common.types import Vector, Matrix
-from ..common.vecmath import skew_sym_mat, small_rot
-from ..projectile.kinematics import ProjectileKinematicState
+from ..common.vecmath import moment_about, skew_sym_mat
+from ..projectile.kinematics import ProjectileKinematicState, cross_section_frame
 from ..projectile.modal_field import GuideModalField
+from ..projectile.projectile import Slider
 from .profile import GuideProfile, SurfaceContact
 from .contact_model import normal_force, friction_force
 
@@ -31,15 +32,20 @@ class SliderContact:
     x_r_i : float
         Axial station of the contact cross-section (Eq. 55).
     in_phase : bool
-        Whether the slider is still within the guide (phase of action, Eq. 61).
+        Whether the slider is still within the guide -- the phase of action, Eq. 61.
     surfaces : List[SurfaceContact]
-        Active guide faces (penetration > 0) from the profile.
+        Active guide faces, those with positive penetration, from the profile.
     penetration_velocities : Dict[str, float]
-        Per-face penetration velocity delta_dot (keyed by face label), for memory update.
-    i_q_o1, i_m_o1 : Vector
-        Resultant contact force and moment on the projectile at O1 (Eqs. B22-B23).
-    i_q_pi, i_m_pi : Vector
-        Reaction force and moment on the guide at Pi (Eqs. B24-B25).
+        Per-face penetration velocity ``delta_dot``, keyed by face label, for the
+        impact-velocity memory update.
+    i_q_o1 : Vector
+        Resultant contact force on the projectile at O1 (Eq. B22).
+    i_m_o1 : Vector
+        Resultant contact moment on the projectile at O1 (Eq. B23).
+    i_q_pi : Vector
+        Reaction force on the guide at Pi (Eq. B24).
+    i_m_pi : Vector
+        Reaction moment on the guide at Pi (Eq. B25).
     """
     x_r_i: float
     in_phase: bool
@@ -51,11 +57,35 @@ class SliderContact:
     i_m_pi: Vector
 
 
-def _cross_section(field: GuideModalField, a_ir: Matrix, x: float, p: Vector):
-    """Return (A_IPi, I_r_Pi, phi_r, phi_theta) for the cross-section at axial station x."""
+def _cross_section(
+        field: GuideModalField,
+        a_ir: Matrix,
+        x: float,
+        p: Vector,
+) -> Tuple[Matrix, Vector, Matrix, Matrix]:
+    """
+    Geometry of the guide cross-section at an axial station.
+
+    Parameters
+    ----------
+    field : GuideModalField
+        The guide modal field.
+    a_ir : Matrix
+        Rotation ``A_IR`` from K_R to K_I.
+    x : float
+        Axial station.
+    p : Vector
+        Guide modal coordinates.
+
+    Returns
+    -------
+    tuple
+        ``(A_IPi, I_r_Pi, phi_r, phi_theta)``: the section's attitude, its absolute
+        position, and the two mode-shape blocks there.
+    """
     phi_r, phi_theta = field.phi(x)
-    theta_rp = a_ir.T @ (phi_theta @ p)
-    a_ipi = a_ir @ small_rot(theta_rp)
+    # Same construction as the launch cross-section in the section 3 kinematics.
+    a_ipi, _ = cross_section_frame(a_ir, phi_theta, p)
     i_r_pi = x * a_ir[:, 0] + phi_r @ p
     return a_ipi, i_r_pi, phi_r, phi_theta
 
@@ -69,10 +99,33 @@ def contact_station(
         bracket: float = 0.5,
 ) -> float:
     """
-    Solve Eq. 55 for the contact station x_R,i: the axial station where the vector from the
-    cross-section to the slider center V_i is perpendicular to the cross-section normal
-    e^Pi_x, i.e. g(x) = (I_r_Vi - I_r_Pi(x)) . e^Pi_x(x) = 0. Uses a bracketed root find
-    about the nominal station x0.
+    Solve Eq. 55 for the contact station ``x_R,i``.
+
+    The axial station where the vector from the cross-section to the slider center V_i
+    is perpendicular to the cross-section normal ``e^Pi_x``, i.e. where
+    ``g(x) = (I_r_Vi - I_r_Pi(x)) . e^Pi_x(x) = 0``. Uses a bracketed root find about the
+    nominal station.
+
+    Parameters
+    ----------
+    field : GuideModalField
+        The guide modal field.
+    a_ir : Matrix
+        Rotation ``A_IR`` from K_R to K_I.
+    i_r_vi : Vector
+        Absolute position of the slider center.
+    p : Vector
+        Guide modal coordinates.
+    x0 : float
+        Nominal station, the starting point for the bracket.
+    bracket : float
+        Half-width of the initial bracket, expanded up to six times if the root is not
+        yet enclosed.
+
+    Returns
+    -------
+    float
+        The contact station, or ``x0`` if no sign change could be bracketed.
     """
     def g(x: float) -> float:
         a_ipi, i_r_pi, _, _ = _cross_section(field, a_ir, x, p)
@@ -93,7 +146,7 @@ def evaluate_slider(
         a_ir: Matrix,
         p: Vector,
         p_dot: Vector,
-        slider,
+        slider: Slider,
         profile: GuideProfile,
         x_r: float,
         l_c: float,
@@ -101,32 +154,42 @@ def evaluate_slider(
         station_bracket: float = 0.5,
 ) -> SliderContact:
     """
-    Full section 4 analysis for one slider: phase of action, contact station, penetration,
-    impact velocity, and the resultant force/moment on the projectile and the guide.
+    Full section 4 analysis for one slider.
+
+    Phase of action, contact station, penetration, impact velocity, and the resultant
+    force and moment on both the projectile and the guide.
 
     Parameters
     ----------
     kin : ProjectileKinematicState
-        Section 3 kinematics at O1 (provides r_o1, r_dot_o1, a_ib, omega_ib).
+        Section 3 kinematics at O1, providing ``r_o1``, ``r_dot_o1``, ``a_ib`` and
+        ``omega_ib``.
     field : GuideModalField
-        The guide modal field (evaluated at the per-slider station x_R,i).
+        The guide modal field, evaluated at the per-slider station ``x_R,i``.
     a_ir : Matrix
-        Rotation A_IR (K_R -> K_I).
-    p, p_dot : Vector
-        Launch-vehicle modal coordinates and rates.
-    slider : projectile.Slider
-        The slider (body-frame offset B_r_O1Vi and radius).
+        Rotation ``A_IR`` from K_R to K_I.
+    p : Vector
+        Launch-vehicle modal coordinates.
+    p_dot : Vector
+        Launch-vehicle modal rates.
+    slider : Slider
+        The slider: its body-frame offset ``B_r_O1Vi`` and radius.
     profile : GuideProfile
         The guide cross-section contact model.
     x_r : float
-        Axial coordinate of O1 (needed for the phase-of-action test).
+        Axial coordinate of O1, needed for the phase-of-action test.
     l_c : float
-        Distance from O1 to the guide front exit at t = 0 (Eq. 61).
+        Distance from O1 to the guide front exit at ``t = 0`` (Eq. 61).
     impact_velocities : Dict[str, float] | None
-        Per-face impact-onset velocity delta_dot_minus (the section-5 memory). Faces not
-        present are treated as making first contact (delta_dot_minus = current delta_dot).
+        Per-face impact-onset velocity ``delta_dot_minus``, the section 5 memory. Faces
+        not present are treated as making first contact.
     station_bracket : float
-        Bracket size for the contact station root-find.
+        Bracket size for the contact-station root find.
+
+    Returns
+    -------
+    SliderContact
+        The slider's contact state and resultants.
     """
     p = np.asarray(p, dtype=np.float64)
     p_dot = np.asarray(p_dot, dtype=np.float64)
@@ -134,7 +197,7 @@ def evaluate_slider(
     zeros = np.zeros(3, dtype=np.float64)
 
     br_o1vi = np.asarray(slider.position, dtype=np.float64)
-    i_r_o1vi = kin.a_ib @ br_o1vi                      # I_r_O1Vi
+    i_r_o1vi = kin.a_ib @ br_o1vi                       # I_r_O1Vi
     i_r_vi = kin.r_o1 + i_r_o1vi                        # I_r_Vi (Eq. 50)
 
     # --- Phase of action (Eq. 61) ---
@@ -182,17 +245,17 @@ def evaluate_slider(
         force_kpi += q_n * s.normal + f_friction
 
     i_q_o1 = a_ipi @ force_kpi                           # Eq. B22
-    i_m_o1 = skew_sym_mat(i_r_o1vi) @ i_q_o1             # Eq. B23
+    i_m_o1 = moment_about(i_r_o1vi, i_q_o1)              # Eq. B23
     i_q_pi = -i_q_o1                                     # Eq. B24
-    i_m_pi = skew_sym_mat(i_r_vi - i_r_pi) @ i_q_pi      # Eq. B25 (I_r_Pi_Vi = I_r_Vi - I_r_Pi)
+    i_m_pi = moment_about(i_r_vi - i_r_pi, i_q_pi)       # Eq. B25 (I_r_Pi_Vi = I_r_Vi - I_r_Pi)
 
     return SliderContact(
         x_r_i=float(x_r_i),
         in_phase=True,
         surfaces=surfaces,
         penetration_velocities=pen_vels,
-        i_q_o1=i_q_o1.astype(np.float64),
-        i_m_o1=i_m_o1.astype(np.float64),
-        i_q_pi=i_q_pi.astype(np.float64),
-        i_m_pi=i_m_pi.astype(np.float64),
+        i_q_o1=i_q_o1,
+        i_m_o1=i_m_o1,
+        i_q_pi=i_q_pi,
+        i_m_pi=i_m_pi,
     )
