@@ -90,7 +90,10 @@ def test_rail_corner_two_faces():
 
 
 # --------------------------------------------------------------------------- #
-# CanisterProfile (groove: +/- y side walls, +z deep bottom wall; Fig. 4)
+# CanisterProfile. The canister's grooves are horizontal slots in its two side walls
+# (Fig. 10b), so in the NED cross-section frame the slot's flanks trap the slider
+# VERTICALLY (two-sided, +/- clearance_z on e_z) and its deep end limits the slider
+# LATERALLY (one-sided, +clearance_y on e_y).
 # --------------------------------------------------------------------------- #
 CY, CZ = 1e-3, 1e-3
 
@@ -103,32 +106,42 @@ def test_canister_no_contact_when_centered():
     assert _canister().contacts(np.array([0.0, 0.0, 0.0])) == []
 
 
-def test_canister_side_contact():
+def test_canister_lower_flank_contact():
+    """Gravity presses the slider down onto the lower flank: reaction points back up."""
     p = 2e-4
-    (c,) = _canister().contacts(np.array([0.0, CY + p, 0.0]))
-    assert c.label == "side"
+    (c,) = _canister().contacts(np.array([0.0, 0.0, CZ + p]))
+    assert c.label == "flank"
     assert np.isclose(c.penetration, p)
-    assert np.allclose(c.normal, [0, -1, 0])
+    assert np.allclose(c.normal, [0, 0, -1])
     assert c.exponent == 1.5
 
 
+def test_canister_upper_flank_contact():
+    """The flanks are a two-sided pair, so lifting the slider also makes contact."""
+    p = 2e-4
+    (c,) = _canister().contacts(np.array([0.0, 0.0, -(CZ + p)]))
+    assert c.label == "flank"
+    assert np.isclose(c.penetration, p)
+    assert np.allclose(c.normal, [0, 0, 1])
+
+
 def test_canister_bottom_contact():
-    # Slider pressed past the bottom clearance into the +z deep wall.
+    """Slider pushed laterally into the deep end of the slot."""
     p = 3e-4
-    (c,) = _canister().contacts(np.array([0.0, 0.0, CZ + p]))
+    (c,) = _canister().contacts(np.array([0.0, CY + p, 0.0]))
     assert c.label == "bottom"
     assert np.isclose(c.penetration, p)
-    assert np.allclose(c.normal, [0, 0, -1])  # deep wall reacts back in -z
+    assert np.allclose(c.normal, [0, -1, 0])   # deep wall reacts back in -y
 
 
-def test_canister_side_and_bottom_together():
+def test_canister_flank_and_bottom_together():
     labels = {c.label for c in _canister().contacts(np.array([0.0, CY + 1e-4, CZ + 1e-4]))}
-    assert labels == {"side", "bottom"}
+    assert labels == {"flank", "bottom"}
 
 
-def test_canister_open_side_no_negative_z_contact():
-    # The groove is open toward the missile (-z): a slider offset in -z makes no contact.
-    assert _canister().contacts(np.array([0.0, 0.0, -0.05])) == []
+def test_canister_bottom_is_one_sided():
+    """The slot only has a far end on one side; retreating out of it makes no contact."""
+    assert _canister().contacts(np.array([0.0, -0.05, 0.0])) == []
 
 
 def test_uniform_profile_ignores_station():

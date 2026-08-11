@@ -26,6 +26,30 @@ class Mode:
     internal_states: Dict[EntityID, Vector]
 
 
+def null_space_dimension(sigma: Vector, max_dim: int = 6) -> int:
+    """
+    Estimate the dimension of the null space of the overall transfer matrix from its
+    singular-value spectrum -- that is, the multiplicity of the eigenfrequency.
+
+    A simple absolute threshold is unreliable here: at an eigenfrequency the smallest
+    singular value can land anywhere from 1e-5 to 1e-13 depending on conditioning. What
+    *is* robust is the gap. The null-space singular values sit orders of magnitude below
+    the rest, so the spectrum is cut at its largest multiplicative jump.
+
+    :param sigma: Singular values in descending order (as returned by ``np.linalg.svd``).
+    :param max_dim: Largest multiplicity to consider. Guards against a badly
+        rank-deficient matrix being read as a hugely degenerate eigenspace.
+    :return: The number of trailing singular values belonging to the null space.
+    """
+    tail = np.asarray(sigma[-(max_dim + 1):], dtype=np.float64)
+    ascending = tail[::-1]                      # walk up from the smallest
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = np.where(ascending[:-1] > 0, ascending[1:] / ascending[:-1], np.inf)
+    if ratios.size == 0:
+        return 1
+    return int(np.argmax(ratios)) + 1
+
+
 class System:
 
     def __init__(self, system_topo: TopologyHandler):
@@ -333,14 +357,26 @@ class System:
             omega_max: int = 1000,
             search_res: int = 10000,
             rtol: float = 1e-5,
-            mtol: float = 1e-5
+            mtol: float = 1e-5,
+            max_multiplicity: int = 6,
     ) -> List[Mode]:
         """
+        Find the system's natural modes, resolving repeated eigenfrequencies in full.
+
+        An eigenfrequency is repeated whenever the overall transfer matrix has a null
+        space of dimension greater than one there, which symmetric systems produce
+        routinely -- a body on springs of equal stiffness in y and z has a two-dimensional
+        eigenspace at one frequency. Every basis vector of that eigenspace is a genuine,
+        physically distinct mode, so all of them are returned. Taking only one would
+        silently discard part of the system's response without any visible symptom.
+
+        Note that ``n_modes`` counts *distinct eigenfrequencies*: the returned list is
+        longer than ``n_modes`` when some of them are repeated.
 
         Parameters
         ----------
         n_modes: int
-            The number of natural modes to find.
+            The number of distinct natural frequencies to retain.
         omega_min: float
             The minimum frequency for the search.
         omega_max: float
@@ -354,10 +390,15 @@ class System:
         mtol: float
             Absolute tolerance for merging modes that are very close in frequency.
             If two modes are within mtol of each other, they will be considered the same mode and only one will be kept.
+        max_multiplicity: int
+            Cap on the multiplicity detected at any one eigenfrequency, guarding against a
+            badly conditioned transfer matrix being read as a large degenerate eigenspace.
 
         Returns
         -------
-
+        List[Mode]
+            The modes, sorted by frequency. Repeated eigenfrequencies contribute one
+            entry per eigenvector, so ``len(result)`` may exceed ``n_modes``.
         """
 
         omega = np.linspace(omega_min, omega_max, search_res)
@@ -370,6 +411,7 @@ class System:
         candidates, _ = find_peaks(-sigma, prominence=prominence)
 
         modes = []
+        found_frequencies: List[float] = []
         # Refine candidates
         for idx in candidates:
             if idx == 0 or idx == len(omega) - 1:
@@ -382,70 +424,147 @@ class System:
             )
             refined_omega: float = res.x
             # It shouldn't happen if the sweep is fine enough, but we should avoid duplicating modes
-            if any(np.isclose(refined_omega, m.frequency, rtol=mtol) for m in modes):
+            if any(np.isclose(refined_omega, f, rtol=mtol) for f in found_frequencies):
                 continue
 
-            # Apply SVD to the transfer matrix at the refined frequency
-            u, _, z_merged, rem_bounds = self.overall_transfer_mat(refined_omega)
-            _, s, vh = np.linalg.svd(u)
-            # TODO: make homogenous solution cleaner
-            # FIX: Turn OFF external forcing and non-zero boundaries for homogenous mode shapes
-            z_merged_homogenous = np.array([i if i is None else 0.0 for i in z_merged])
-
-            # Reciprocal condition number
+            # Reciprocal condition number of the transfer matrix at the refined frequency
+            s = np.linalg.svd(self.overall_transfer_mat(refined_omega)[0], compute_uv=False)
             rcond = s[-1] / s[0]
 
             logger.info(f"Mode candidate at {float(refined_omega):.3e} rad/s.")
             logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
-            # If rcond passes the tolerance, save the frequency and mode states
+            # If rcond passes the tolerance, keep every eigenvector at this frequency --
+            # the null space may be more than one-dimensional (a repeated eigenfrequency).
             if rcond < rtol:
-                all_state_vecs = self.propagate_state(omega=refined_omega, z_red=vh[-1], z_merged=z_merged_homogenous,
-                                                      rem_boundary_ids=rem_bounds)
-                mode = Mode(frequency=refined_omega, internal_states=all_state_vecs)
-                modes.append(mode)
+                found_frequencies.append(refined_omega)
+                modes.extend(self.eigenvectors_at(refined_omega, max_multiplicity))
 
         modes.sort(key=lambda x: x.frequency)
+        found_frequencies.sort()
 
-        logger.info(f"Found {len(modes)} natural modes between {omega_min:.3e} rad/s and {omega_max:.3e} rad/s.")
+        logger.info(
+            f"Found {len(modes)} natural modes across {len(found_frequencies)} distinct "
+            f"eigenfrequencies between {omega_min:.3e} rad/s and {omega_max:.3e} rad/s."
+        )
         for mode in modes:
             logger.debug(f"Mode at {mode.frequency:.3e} rad/s.")
 
-        return modes[:n_modes]
+        # n_modes counts distinct eigenfrequencies, so truncate on frequency rather than on
+        # position -- slicing the list directly would cut a repeated cluster in half and
+        # hand back an incomplete eigenspace.
+        if len(found_frequencies) > n_modes:
+            cutoff = found_frequencies[n_modes - 1]
+            modes = [m for m in modes if m.frequency <= cutoff]
+
+        return modes
 
     def solve(self):
         # TODO: move some of the logic here
         raise NotImplementedError
 
+    def mode_shape(self, mode: Mode, e_id: EntityID, position: Vector) -> Vector:
+        """
+        A mode's shape at an arbitrary material point: the 6x1 kinematic state
+        ``[x, y, z, theta_x, theta_y, theta_z]``, in the global frame.
+
+        A mode stores the state at each element's main input; pushing it across the
+        element's own transfer matrix up to ``position`` gives the state anywhere inside
+        it -- along a beam, or at any point of a rigid body. This is the quantity that a
+        generalized coordinate weights to give physical motion, and the quantity a point
+        load is dotted into to give a modal force.
+
+        :param mode: A mode from :meth:`natural_modes`.
+        :param e_id: Element the point belongs to.
+        :param position: Point coordinates in the element's local frame.
+        :return: The 6-component mode shape at that point.
+        """
+        pred_id, input_pos = self.topology.main_input_of(e_id)
+        elem = self.topology.get_element(e_id)
+        u = elem.u(input_pos, np.asarray(position, dtype=np.float64), mode.frequency)
+        return (u @ mode.internal_states[pred_id])[0:6].astype(np.float64)
+
+    def _element_extent(self, e_id: EntityID) -> Tuple[Vector, Vector]:
+        """
+        The pair of positions spanning an element for the purpose of integrating its mass:
+        from its main input to its centre of mass (rigid body) or its output port (beam).
+        """
+        info = self.topology.get_element_info(e_id)
+        _, input_pos = self.topology.main_input_of(e_id)
+        output_pos = info.obj.com_pos if isinstance(info.obj, RigidBody) else info.output_port.pos
+        return input_pos, output_pos
+
+    def modal_product(self, mode_k: Mode, mode_p: Mode) -> float:
+        """
+        The augmented inner product ``<M V^k, V^p>`` over the whole system (Rui 3.48).
+
+        For ``mode_k is mode_p`` this is the modal mass ``M_p``. For distinct modes at
+        *different* eigenfrequencies orthogonality makes it vanish; for distinct modes
+        sharing a repeated eigenfrequency it generally does not, which is why an
+        orthogonalisation step is needed before the modal equations decouple (see
+        :func:`dynaramp.mstmm.response.augmented_modes`).
+
+        Both modes must have been computed at the same frequency for an off-diagonal
+        result to mean anything.
+
+        :param mode_k: First mode.
+        :param mode_p: Second mode.
+        :return: The scalar inner product.
+        """
+        total = 0.0
+        for e_id in self.topology.elements:
+            elem = self.topology.get_element(e_id)
+            pred_id, _ = self.topology.main_input_of(e_id)
+            input_pos, output_pos = self._element_extent(e_id)
+            total += float(elem.modal_product(
+                input_pos, output_pos, mode_k.frequency,
+                mode_k.internal_states[pred_id], mode_p.internal_states[pred_id],
+            ))
+        return total
+
     def calc_system_modal_masses(self, modes: List[Mode]) -> Vector:
+        """
+        The modal mass of the whole system for each mode -- the diagonal of
+        :meth:`modal_product`.
+        """
+        return np.array([self.modal_product(m, m) for m in modes], dtype=np.float64)
 
-        m_mat = np.zeros(len(modes), dtype=np.float64)
+    def eigenvectors_at(self, omega: float, max_multiplicity: int = 6) -> List[Mode]:
+        """
+        Every eigenvector of the system at an already-known eigenfrequency.
 
-        for s, mode in enumerate(modes):
-            # Calculate modal mass of the system for the s-th mode
-            for e_id in self.topology.elements:
-                elem_info = self.topology.get_element_info(e_id)
-                elem_obj = elem_info.obj
-                # Determine main predecessor
-                pred_id = next(n
-                               for n in self.topology.tree.predecessors(e_id)
-                               if self.topology.tree[n][e_id]['input_port'] == elem_info.main_input_idx
-                               )
+        :meth:`natural_modes` calls this once it has refined each frequency in its sweep;
+        it is exposed separately for a frequency obtained some other way -- measured, or
+        read off a chart -- without repeating the search.
 
-                # The local state vector at the input of this specific element
-                local_state = mode.internal_states[pred_id]
+        The number of eigenvectors is the multiplicity of the frequency, read off the
+        singular-value spectrum by :func:`null_space_dimension`. They are orthonormal in
+        R^n but not yet orthogonal in the augmented inner product; see
+        :func:`dynaramp.mstmm.response.augmented_modes` for that step.
 
-                # Retrieve positions for the modal_mass function arguments
-                input_pos = elem_info.ports[elem_info.main_input_idx].pos
-                if isinstance(elem_obj, RigidBody):
-                    # TODO: not the prettiest, should think of something else
-                    output_pos = elem_obj.com_pos  # Use center of mass for rigid bodies
-                else:
-                    output_pos = elem_info.output_port.pos
+        :param omega: A known eigenfrequency [rad/s].
+        :param max_multiplicity: Cap on the detected multiplicity.
+        :return: One :class:`Mode` per null-space direction.
+        """
+        u, _, z_merged, rem_bounds = self.overall_transfer_mat(omega)
+        _, sigma, vh = np.linalg.svd(u)
+        dim = min(null_space_dimension(sigma, max_multiplicity), vh.shape[0])
 
-                # Add the element's contribution to the total system modal mass
-                m_mat[s] += elem_obj.modal_mass(input_pos, output_pos, mode.frequency, local_state)
+        # Homogeneous problem: external forcing and non-zero boundary values are off.
+        z_homogeneous = np.array([None if v is None else 0.0 for v in z_merged])
 
-        return m_mat
+        if dim > 1:
+            logger.info(f"Eigenfrequency {omega:.6e} rad/s has multiplicity {dim}.")
+
+        return [
+            Mode(
+                frequency=omega,
+                internal_states=dict(self.propagate_state(
+                    omega=omega, z_red=vh[-(i + 1)],
+                    z_merged=z_homogeneous, rem_boundary_ids=rem_bounds,
+                )),
+            )
+            for i in range(dim)
+        ]
 
     def get_system_modal_matrices(
             self,

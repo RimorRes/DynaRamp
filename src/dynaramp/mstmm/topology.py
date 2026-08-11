@@ -84,6 +84,31 @@ class TopologyHandler:
     def get_element_info(self, e_id: EntityID) -> ElementInfo:
         return self._einfo_cache[e_id]
 
+    @requires_tree_generated
+    def main_input_of(self, e_id: EntityID) -> Tuple[EntityID, Vector]:
+        """
+        The predecessor feeding an element's *main* input port, with that port's position
+        in the element's local frame.
+
+        An element's state vector is propagated from its main input, so this pair is the
+        anchor for anything evaluated inside the element: its transfer matrix, its modal
+        mass, or a mode shape at some station along it.
+
+        :param e_id: The element to look up.
+        :return: ``(predecessor_id, main_input_position)``.
+        """
+        info = self._einfo_cache[e_id]
+        try:
+            pred_id = next(
+                n for n in self._internal_graph.predecessors(e_id)
+                if self._internal_graph[n][e_id]["input_port"] == info.main_input_idx
+            )
+        except StopIteration as exc:
+            err_msg = f"Element [{e_id}] has no predecessor on its main input port."
+            logger.error(err_msg)
+            raise ValueError(err_msg) from exc
+        return pred_id, info.ports[info.main_input_idx].pos
+
     @property
     def graph(self) -> nx.DiGraph[EntityID]:
         if self._tree_generated:

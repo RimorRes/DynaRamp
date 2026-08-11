@@ -152,9 +152,31 @@ class Element(ABC):
         return h_matrix
 
     @abstractmethod
+    def modal_product(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
+                      state_k: Vector, state_p: Vector) -> np.float64:
+        """
+        This element's contribution to the augmented inner product ``<M V^k, V^p>``.
+
+        The bilinear form, not just its diagonal: off-diagonal terms are what make it
+        possible to orthogonalise the eigenvectors of a repeated eigenfrequency against
+        each other, which the SVD basis does not do on its own.
+
+        :param input_pos: Main-input reference position (element-local frame).
+        :param output_pos: Far end of the element's extent (its centre of mass for a
+            rigid body, its output port for a beam).
+        :param omega: Frequency of the modes being paired [rad/s].
+        :param state_k: Mode k's state vector at the element's main input.
+        :param state_p: Mode p's state vector at the element's main input.
+        """
+
     def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
                    local_input_state: Vector) -> np.float64:
-        pass
+        """
+        The element's modal mass for one mode -- the diagonal ``<M V^p, V^p>`` of
+        :meth:`modal_product`.
+        """
+        return self.modal_product(input_pos, output_pos, omega,
+                                  local_input_state, local_input_state)
 
 
 class DiscreteElement(Element, ABC):
@@ -164,9 +186,11 @@ class DiscreteElement(Element, ABC):
     def __init__(self, e_id: EntityID, orientation: Matrix | None = None):
         super().__init__(e_id, orientation)
 
-    def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
-                   local_input_state: Vector) -> np.float64:
+    def modal_product(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
+                      state_k: Vector, state_p: Vector) -> np.float64:
         """
+        A discrete element's ``<M V^k, V^p>``: the mass matrix is lumped, so the product
+        is a single bilinear form evaluated at the body's centre of mass.
 
         Parameters
         ----------
@@ -174,33 +198,22 @@ class DiscreteElement(Element, ABC):
         output_pos : Vector
             For a rigid body this should be the center of mass
         omega : float
-        local_input_state : Vector
-            The mode's state vector at the element's main input
-
-        Returns
-        -------
-        np.float64
-            The modal mass of the element for the given mode
+        state_k, state_p : Vector
+            The two modes' state vectors at the element's main input. Pass the same
+            vector twice to recover the modal mass (see :meth:`Element.modal_mass`).
         """
-        # Cast inputs to arrays
         input_pos_arr = np.array(input_pos, dtype=np.float64)
         com_pos_arr = np.array(output_pos, dtype=np.float64)
 
-        # First, we need the state at the COM of the rigid body
+        # Transfer both modes' states to the centre of mass, keeping only the kinematic
+        # half -- the mode shape. The parametric mass matrix lives in the element's local
+        # frame, so rotate the (global) shapes into it; identity for axis-aligned bodies.
         u_com = self.u(input_pos_arr, com_pos_arr, omega)
-        state_vector = u_com @ np.array(local_input_state, dtype=np.float64)
-
-        # Truncate the state vectors to keep only the kinematics -> mode shape
-        v = state_vector[0:6].reshape(6, 1).astype(np.float64)
-
-        # The parametric mass matrix is expressed in the element's local (body)
-        # frame, so rotate the (global) kinematic mode shape into that frame before
-        # forming the quadratic form. Reduces to the identity for axis-aligned bodies.
         r6 = block_rotation(self.orientation)[0:6, 0:6]
-        v = r6.T @ v
+        v_k = r6.T @ (u_com @ np.asarray(state_k, dtype=np.float64))[0:6]
+        v_p = r6.T @ (u_com @ np.asarray(state_p, dtype=np.float64))[0:6]
 
-        # Generalized matrix multiplication (extract the scalar from the 1x1 quadratic form)
-        return np.float64((v.T @ self._m_param_mat @ v).item())
+        return np.float64(v_k @ self._m_param_mat @ v_p)
 
     @property
     @abstractmethod
@@ -216,48 +229,45 @@ class ContinuousElement(Element, ABC):
     def __init__(self, e_id: EntityID, orientation: Matrix | None = None):
         super().__init__(e_id, orientation)
 
-    def modal_mass(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
-                   local_input_state: np.ndarray) -> np.float64:
+    def modal_product(self, input_pos: VectorLike, output_pos: VectorLike, omega: float,
+                      state_k: Vector, state_p: Vector) -> np.float64:
         """
+        A continuous element's ``<M V^k, V^p>``: the mass is distributed, so the bilinear
+        form is integrated along the element's span.
 
         Parameters
         ----------
         input_pos : Vector
         output_pos : Vector
         omega : float
-        local_input_state : Vector
-            The mode's state vector at the element's main input
-
-        Returns
-        -------
-        np.float64
-            The modal mass of the element for the given mode
+        state_k, state_p : Vector
+            The two modes' state vectors at the element's main input. Pass the same
+            vector twice to recover the modal mass (see :meth:`Element.modal_mass`).
         """
-        output_pos_arr = np.array(output_pos, dtype=np.float64)
         input_pos_arr = np.array(input_pos, dtype=np.float64)
-        # TODO: make sure this a generalized, it should be, but double-check
-        beam_len = np.float64(np.linalg.norm(output_pos_arr - input_pos_arr))  # Beam of element
+        output_pos_arr = np.array(output_pos, dtype=np.float64)
+        span = output_pos_arr - input_pos_arr
+        beam_len = float(np.linalg.norm(span))
+        if beam_len == 0.0:
+            return np.float64(0.0)
+        direction = span / beam_len
 
-        # The distributed mass matrix is expressed in the element's local frame;
-        # rotate the (global) kinematic mode shape into that frame before the
-        # quadratic form. Reduces to the identity for axis-aligned beams.
+        # The distributed mass matrix is expressed in the element's local frame; rotate the
+        # (global) mode shapes into it before pairing them. Identity for axis-aligned beams.
         r6 = block_rotation(self.orientation)[0:6, 0:6]
+        state_k = np.asarray(state_k, dtype=np.float64)
+        state_p = np.asarray(state_p, dtype=np.float64)
+        m_bar = self._m_bar_param_mat
 
-        def mass_integrand(x: np.float64) -> np.float64:
-            direction = (output_pos_arr - input_pos_arr) / beam_len
-            current_pos = input_pos_arr + direction * x
-
+        def integrand(x: float) -> float:
             # Propagate from the LOCAL input to the intermediate point x
-            u_x = self.u(input_pos_arr, current_pos, omega)
-            state_at_x = u_x @ np.array(local_input_state, dtype=np.float64)
+            u_x = self.u(input_pos_arr, input_pos_arr + direction * x, omega)
+            v_k = r6.T @ (u_x @ state_k)[0:6]
+            v_p = r6.T @ (u_x @ state_p)[0:6]
+            return float(v_k @ m_bar @ v_p)
 
-            # Truncate the state vectors to keep only the kinematics -> mode shape
-            v = r6.T @ state_at_x[0:6].reshape(6, 1)
-
-            return np.float64((v.T @ self._m_bar_param_mat @ v).item())
-
-        element_modal_mass, _ = integrate.quad(mass_integrand, 0.0, beam_len)
-        return np.float64(element_modal_mass)
+        value, _ = integrate.quad(integrand, 0.0, beam_len)
+        return np.float64(value)
 
     @property
     @abstractmethod

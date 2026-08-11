@@ -138,16 +138,27 @@ class RailProfile(GuideProfile):
 class CanisterProfile(GuideProfile):
     """
     The paper's launch canister groove (Fig. 4), engaged by a spherical slider (ball head).
-    In the NED cross-section frame K_Pi, e^Pi_y is the lateral (side) axis and e^Pi_z the
-    vertical ("down") axis running into the groove depth. The groove has two side walls
-    (+/- y, clearance clearance_y) and a bottom -- the deep radial wall at +z (clearance
-    clearance_z) that the slider is pressed into; it is open on the -z ("up") side.
+
+    The canister carries its grooves as horizontal slots machined into the two side walls
+    (Fig. 10b), so the cross-section is anisotropic and the two clearances are *not*
+    interchangeable. In the NED cross-section frame K_Pi (e^Pi_y lateral/right,
+    e^Pi_z vertical/down):
+
+      * the slot's flanks trap the slider VERTICALLY, from above and below, giving a
+        two-sided pair of walls at +/- clearance_z along e^Pi_z (Eqs. 57-58);
+      * the slot's far end limits the slider LATERALLY -- the "bottom" of the groove in
+        the sense of its deepest point, not its floor -- as a single wall at
+        +clearance_y along e^Pi_y (Eqs. 59-60).
+
+    So `clearance_z` is the vertical (flank) gap and `clearance_y` the lateral (depth)
+    gap. Note the paper's own frame is (+x forward, +y up, +z right), the mirror of NED
+    in this respect: its c_y is the vertical clearance and belongs here in `clearance_z`,
+    and its c_z is the lateral one and belongs in `clearance_y`. Getting this backwards
+    is silent -- the simulation runs and returns plausible nonsense.
 
     The clearances are ball-surface-to-wall gaps (as drawn in Fig. 4c), so the ball radius
     is folded into them; the radius enters only the Hertzian stiffness (exponent n = 1.5,
-    `contact_model.hertz_stiffness`), not this penetration geometry. Contact occurs on the
-    side when |y| > clearance_y (Eqs. 57-58) and on the bottom when z > clearance_z
-    (Eqs. 59-60).
+    `contact_model.hertz_stiffness`), not this penetration geometry.
     """
 
     def __init__(
@@ -181,16 +192,16 @@ class CanisterProfile(GuideProfile):
         y, z = float(r_vi[1]), float(r_vi[2])
         out: List[SurfaceContact] = []
 
-        # Side walls at +/- clearance_y (Eqs. 57-58).
-        d_y = abs(y) - self.clearance_y
-        if d_y > 0.0:
-            out.append(self._surface("side", d_y, [0.0, -float(np.sign(y)), 0.0]))
-
-        # Bottom = deep radial wall at +z (Eqs. 59-60): contact when the slider is pressed
-        # past the bottom clearance; the wall reacts back in -z.
-        d_z = z - self.clearance_z
+        # Groove flanks at +/- clearance_z, trapping the slider vertically (Eqs. 57-58).
+        d_z = abs(z) - self.clearance_z
         if d_z > 0.0:
-            out.append(self._surface("bottom", d_z, [0.0, 0.0, -1.0]))
+            out.append(self._surface("flank", d_z, [0.0, 0.0, -float(np.sign(z))]))
+
+        # Groove bottom -- the deep end of the slot -- at +clearance_y (Eqs. 59-60):
+        # contact when the slider is pushed laterally into it; the wall reacts back in -y.
+        d_y = y - self.clearance_y
+        if d_y > 0.0:
+            out.append(self._surface("bottom", d_y, [0.0, -1.0, 0.0]))
 
         return out
 

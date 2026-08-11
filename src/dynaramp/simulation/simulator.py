@@ -7,6 +7,7 @@ from typing import List, Sequence, Tuple, cast
 import numpy as np
 
 from ..common.types import Vector, Matrix
+from ..mstmm.response import ModalBasis
 from ..projectile.state import ProjectileState
 from ..projectile.kinematics import ProjectileKinematics
 from ..projectile.dynamics import ProjectileEOM
@@ -85,9 +86,12 @@ class LaunchSimulator:
         self.solver = solver
         self.forces = list(forces)
         self.n = field.n_modes
-        self.modal_masses = field.system.calc_system_modal_masses(field.modes)
-        freqs = np.array([m.frequency for m in field.modes], dtype=np.float64)
-        self.c_g, self.k_g = modal_damping_stiffness(freqs, rayleigh)
+        # ModalBasis carries the frequencies and modal masses together and rejects a
+        # basis with a non-positive modal mass, which would otherwise surface much later
+        # as a silently wrong response.
+        self.basis = ModalBasis(system=field.system, modes=field.modes)
+        self.modal_masses = self.basis.modal_masses
+        self.c_g, self.k_g = modal_damping_stiffness(self.basis.frequencies, rayleigh)
 
     # --- state packing: z = [p (n), p_dot (n), x (6), y (6)] ---
     def _split(self, z: Vector):
@@ -155,7 +159,8 @@ class LaunchSimulator:
         t = 0.0
         exited = False
         n_steps = int(np.ceil(t_max / dt))
-        for _ in range(n_steps):
+        print(f"Max number of simulation steps: {n_steps}")
+        for step_i in range(n_steps):
             z_next, memory_next, contact = self._rk4_step(t, z, dt, memory)
 
             # record the state at t (before advancing)
@@ -171,6 +176,9 @@ class LaunchSimulator:
             if contact.slider_contacts and all(not sc.in_phase for sc in contact.slider_contacts):
                 exited = True
                 break
+
+            if step_i % (n_steps // 1000) < 1:
+                print(f"({step_i/n_steps:6.1%}) {step_i:>{len(str(n_steps))}d} / {n_steps} steps")
 
             z, memory, t = z_next, memory_next, t + dt
 
