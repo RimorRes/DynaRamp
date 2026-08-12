@@ -2,10 +2,10 @@
 DynaRamp end-to-end demo: a sounding rocket launching off a flexible rail.
 
 This wires together all four sections of the framework:
-  * section 2 (mstmm)       -- the flexible rail's modal model,
-  * section 3 (projectile)  -- the rocket's kinematics and equations of motion in the rail,
-  * section 4 (contact)     -- the T-shoe / rail-groove contact with clearance,
-  * section 5 (simulation)  -- the coupled solve (Eq. 67) and time integration.
+  * section 2 (mstmm) -- the flexible rail's modal model,
+  * section 3 (projectile) -- the rocket's kinematics and equations of motion in the rail,
+  * section 4 (contact) -- the T-shoe / rail-groove contact with clearance,
+  * section 5 (simulation) -- the coupled solution (Eq. 67) and time integration.
 
 It runs a powered launch until both slider pairs have left the rail, then reports the
 initial-disturbance quantities (exit attitude and rates) and plots the histories.
@@ -34,7 +34,7 @@ def build_rail() -> dyn.System:
     """A slender steel launch rail, modeled as an Euler-Bernoulli beam clamped at its base
     (x = 0) and free at the muzzle end (x = L)."""
     topo = dyn.TopologyHandler()
-    length = 518 * 25.4e-3 # rail length [m]
+    length = 518 * 25.4e-3  # rail length [m]
     width, height = 0.5, 1.0  # cross-section [m]
     beam = dyn.EulerBernoulliBeam(
         e_id="rail",

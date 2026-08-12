@@ -60,7 +60,7 @@ class _ConstraintPlan:
         build its kinematic contribution.
     pairs : tuple
         One ``(reference_tips, other_tips)`` pair per independent constraint set. With
-        ``N`` incoming branches there are ``N - 1`` of them.
+        ``N`` incoming branches, there are ``N - 1`` of them.
     """
     tip_terms: Dict[EntityID, Tuple[_Plan, Matrix]]
     pairs: Tuple[Tuple[FrozenSet[EntityID], FrozenSet[EntityID]], ...]
@@ -73,7 +73,7 @@ class _Assembly:
 
     Rebuilt only when the topology changes. A modal search evaluates the overall transfer
     matrix at thousands of frequencies, and without this every one of them re-walked the
-    tree, re-resolved every path and re-derived the boundary-condition masks.
+    tree, re-resolved every path, and re-derived the boundary-condition masks.
 
     Attributes
     ----------
@@ -140,6 +140,7 @@ def null_space_dimension(sigma: Vector, max_dim: int = 6) -> int:
     return int(np.argmax(ratios)) + 1
 
 
+# noinspection GrazieStyle
 class System:
     """
     Solver operating on a reduced tree topology.
@@ -173,7 +174,7 @@ class System:
 
         Notes
         -----
-        Staleness is detected by identity of the topology's ``z_all`` array, which is
+        Staleness is detected by the identity of the topology's ``z_all`` array, which is
         replaced wholesale whenever the tree is regenerated.
         """
         z_all = self.topology.z_all
@@ -517,7 +518,7 @@ class System:
         Raises
         ------
         RuntimeError
-            If any element was not reached by the sweep.
+            If the sweep did not reach any element.
         ValueError
             If the propagated state does not match the root boundary condition.
         """
@@ -625,7 +626,7 @@ class System:
 
         An eigenfrequency is repeated whenever the overall transfer matrix has a null
         space of dimension greater than one there, which symmetric systems produce
-        routinely. E.g. a body on springs of equal stiffness in y and z has a
+        routinely. E.g., a body on springs of equal stiffness in y and z has a
         two-dimensional eigenspace at one frequency. Every basis vector of that
         eigenspace is a genuine, physically distinct mode, so all of them are returned.
         Taking only one would silently discard part of the system's response without any
@@ -847,7 +848,7 @@ class System:
 
     def _element_extent(self, e_id: EntityID) -> Tuple[Vector, Vector]:
         """
-        The pair of positions spanning an element, for the purpose of integrating its mass.
+        The pair of positions spanning an element, to integrate its mass.
 
         Parameters
         ----------
@@ -922,7 +923,7 @@ class System:
             rayleigh: Tuple[float, float] | None = None,
     ) -> Tuple[Matrix, Matrix] | Tuple[Matrix, Matrix, Matrix]:
         """
-        The diagonal modal mass, stiffness and (optionally) damping matrices.
+        The diagonal modal mass, stiffness, and (optionally) damping matrices.
 
         Parameters
         ----------

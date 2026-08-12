@@ -191,7 +191,7 @@ class RigidBody(DiscreteElement):
 
 class EulerBernoulliBeam(ContinuousElement):
     """
-    A uniform Euler-Bernoulli beam with axial, torsional and biaxial bending compliance.
+    A uniform Euler-Bernoulli beam with axial, torsional, and biaxial bending compliance.
 
     Parameters
     ----------
@@ -208,16 +208,16 @@ class EulerBernoulliBeam(ContinuousElement):
     area : float
         Cross-sectional area A.
     i_y : float
-        Second moment of area about the local y-axis, governing bending in the x-z plane.
+        The second moment of area about the local y-axis, governing bending in the x-z plane.
     i_z : float
-        Second moment of area about the local z-axis, governing bending in the x-y plane.
+        The second moment of area about the local z-axis, governing bending in the x-y plane.
     orientation : Matrix | None
         Optional 3x3 direction-cosine matrix (local -> global).
 
     Notes
     -----
-    The transfer matrix is assembled from the *normalized* Krylov-Duncan group (see
-    :mod:`dynaramp.mstmm.krylov`), so no wave number is ever divided by. The matrix is
+    The transfer matrix is assembled from the *normalized* Krylov-Duncan group
+    (see :mod:`dynaramp.mstmm.krylov`), so no wave number is ever divided by. The matrix is
     therefore valid at ``omega = 0``, where it reduces exactly to the static transfer
     matrix of the beam, and it retains full precision at small argument, where the
     closed-form Krylov functions lose roughly eight digits to cancellation.
@@ -275,7 +275,7 @@ class EulerBernoulliBeam(ContinuousElement):
         Returns
         -------
         tuple of float
-            ``(beta_x, lam_y, lam_z, gam_theta_x)``: the axial, the two bending and the
+            ``(beta_x, lam_y, lam_z, gam_theta_x)``: the axial, the two bending, and the
             torsional wave numbers. All vanish at ``omega = 0``.
         """
         cached = self._wave_cache.get(omega)

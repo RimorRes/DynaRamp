@@ -1,28 +1,26 @@
 """
 Krylov-Duncan functions for the Euler-Bernoulli beam transfer matrix.
 
-The four functions
-
     S(z) = (cosh z + cos z) / 2        U(z) = (cosh z - cos z) / 2
     T(z) = (sinh z + sin z) / 2        V(z) = (sinh z - sin z) / 2
 
-are the standard basis for the bending solution of a uniform beam. In a transfer
-matrix they never appear alone: every entry that carries a flexibility divides one
+The four functions are the standard basis for the bending solution of a uniform beam.
+In a transfer matrix they never appear alone: every entry that carries a flexibility divides one
 of them by a power of the wave number ``lam``, as ``T/lam``, ``U/(EI lam^2)``,
 ``V/(EI lam^3)``. Since the argument is itself ``z = lam x``, those quotients are
 
     T(z)/lam = x (T(z)/z),   U(z)/lam^2 = x^2 (U(z)/z^2),   V(z)/lam^3 = x^3 (V(z)/z^3)
 
-so the wave number cancels exactly. This module therefore returns the *normalized*
+In doing so the wave number cancels exactly. This module therefore returns the *normalized*
 group ``(S, T/z, U/z^2, V/z^3)`` and never divides by ``lam`` at all. Two problems
 disappear as a result.
 
 Zero frequency
 --------------
-At ``omega = 0`` every wave number vanishes and the un-normalized quotients are all
+At ``omega = 0``, every wave number vanishes, and the unnormalized quotients are all
 ``0/0``. Their limits are finite -- they are precisely the static flexibilities of a
 cantilever, ``x``, ``x^2/2EI``, ``x^3/6EI`` -- so the beam transfer matrix has a
-perfectly well-defined static limit and the NaN is an artifact of the factorization,
+perfectly well-defined static limit, and the NaN is an artifact of the factorization,
 not physics. With the normalized group the limit is reached exactly, from
 ``T/z -> 1``, ``U/z^2 -> 1/2``, ``V/z^3 -> 1/6``, with no special case anywhere.
 
@@ -42,7 +40,7 @@ the same sum with a shifted factorial:
     S    = sum_j w^j / (4j)!        T/z   = sum_j w^j / (4j+1)!
     U/z^2 = sum_j w^j / (4j+2)!     V/z^3 = sum_j w^j / (4j+3)!
 
-Every one is even in ``z``, so negative spans need no special handling.
+Each one is even in ``z``, so negative spans need no special handling.
 """
 
 from __future__ import annotations
@@ -93,14 +91,14 @@ def krylov_normalized(z: float) -> Tuple[float, float, float, float]:
     Parameters
     ----------
     z : float
-        The argument ``lam * x``. May be negative; all four returned functions are
+        The argument ``lam * x``. Can be negative; all four returned functions are
         even in ``z``.
 
     Returns
     -------
     tuple of float
         ``(s, t1, u2, v3)`` where ``s = S(z)``, ``t1 = T(z)/z``, ``u2 = U(z)/z^2``
-        and ``v3 = V(z)/z^3``. At ``z = 0`` these are exactly ``(1, 1, 1/2, 1/6)``.
+        and ``v3 = V(z)/z^3``. At ``z = 0``, these are exactly ``(1, 1, 1/2, 1/6)``.
 
     Notes
     -----

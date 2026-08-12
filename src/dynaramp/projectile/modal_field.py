@@ -83,7 +83,7 @@ class GuideModalField:
         Retained modes, from ``System.natural_modes``, in ascending frequency order.
     a_ir : Matrix | None
         3x3 rotation matrix ``A_IR`` mapping the reference frame K_R to the inertial
-        frame K_I -- the guide's absolute attitude, e.g. launcher elevation and azimuth.
+        frame K_I -- the guide's absolute attitude, e.g., launcher elevation and azimuth.
         It projects every mode-shape block into K_I and is consumed by the section 3
         kinematics and the section 4 contact analysis. Defaults to the identity
         (launcher upright, axes aligned with K_I).
@@ -103,7 +103,7 @@ class GuideModalField:
     by ``h^2``, so its round-off error grows as ``eps / h^2`` while its truncation error
     falls as ``h^4``; the total error is therefore V-shaped in ``h``, and a step chosen
     "small for accuracy" lands on the wrong side of the minimum. A step of ``1e-4`` on a
-    guide of order 10 m carries roughly ``5e-7`` relative error in ``phi_r_d2``, against
+    guide of order 10 m roughly carries ``5e-7`` relative error in ``phi_r_d2``, against
     the ``1e-9`` available at the optimum -- and ``phi_r_d2`` feeds the convective
     acceleration terms of Eqs. 31 and 33 directly.
     """
@@ -173,7 +173,7 @@ class GuideModalField:
         That length is *not* the whole guide. The n-th mode of a beam carries roughly
         ``n`` half-waves along its span, so the finest feature the stencil has to
         resolve is of order ``L / n_modes``, and retaining more modes should shorten
-        the step. Using the full length instead would over-step a high-mode basis.
+        the step. Using the full length instead would overstep a high-mode basis.
 
         ``eps^(1/6)`` is about ``2.4e-3``, so a 13 m guide with seven modes lands near
         ``5e-3`` -- some fifty times larger than a naive ``1e-4``, and about two orders

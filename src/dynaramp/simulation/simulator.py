@@ -26,7 +26,7 @@ _PROGRESS_REPORTS = 20
 @dataclass
 class LaunchResult:
     """
-    Time histories of a launch simulation. Each array is indexed by time step.
+    Time histories of a launch simulation. Time step indexes each array.
 
     Attributes
     ----------
@@ -67,27 +67,28 @@ class LaunchResult:
 
 
 class LaunchSimulator:
+    # noinspection GrazieInspection
     """
-    Time-integrates the coupled launch dynamics (section 5, Fig. 6).
+        Time-integrates the coupled launch dynamics (section 5, Fig. 6).
 
-    Uses a fixed-step RK4 scheme. The stepping is isolated in :meth:`_rk4_step` so a
-    stiff or implicit integrator can be swapped in later without touching the physics in
-    :meth:`_rhs`.
+        Uses a fixed-step RK4 scheme. The stepping is isolated in :meth:`_rk4_step` so a
+        stiff or implicit integrator can be swapped in later without touching the physics in
+        :meth:`_rhs`.
 
-    Parameters
-    ----------
-    field : GuideModalField
-        The guide modal field, which also carries the solved MSTMM system and the
-        retained modes.
-    projectile : Projectile
-        The projectile's inertial properties.
-    solver : ContactSolver
-        Configured with the sliders, guide profile and exit stations.
-    forces : Sequence[ExternalForce]
-        Non-contact loads: gravity, thrust, and so on.
-    rayleigh : tuple of float
-        Rayleigh damping coefficients ``(alpha, beta)`` for the vehicle modes.
-    """
+        Parameters
+        ----------
+        field : GuideModalField
+            The guide modal field, which also carries the solved MSTMM system and the
+            retained modes.
+        projectile : Projectile
+            The projectile's inertial properties.
+        solver : ContactSolver
+            Configured with the sliders, guide profile, and exit stations.
+        forces : Sequence[ExternalForce]
+            Non-contact loads: gravity, thrust, and so on.
+        rayleigh : tuple of float
+            Rayleigh damping coefficients ``(alpha, beta)`` for the vehicle modes.
+        """
 
     def __init__(
             self,
@@ -147,7 +148,7 @@ class LaunchSimulator:
         -------
         tuple
             ``(z_dot, contact)``. The contact result is returned alongside because the
-            caller needs it for the memory update, the termination test and the history.
+            caller needs it for the memory update, the termination test, and the history.
         """
         p, p_dot, x, y = self._split(z)
         state = ProjectileState(x, y)

@@ -21,7 +21,7 @@ def skew_sym_mat(vec: VectorLike) -> Matrix:
     """
     Skew-symmetric matrix of a 3D vector.
 
-    Defined such that for any vector ``w`` the cross product can be written as a
+    Defined such that for any vector ``w`` the cross-product can be written as a
     matrix product: ``v x w = S(v) @ w``.
 
     Parameters
@@ -342,7 +342,7 @@ def block_rotation(dcm: Matrix) -> Matrix:
     Parameters
     ----------
     dcm : Matrix
-        The 3x3 direction-cosine matrix ``D`` (e.g. a scipy Rotation's ``as_matrix()``).
+        The 3x3 direction-cosine matrix ``D`` (e.g., a scipy Rotation's ``as_matrix()``).
 
     Returns
     -------

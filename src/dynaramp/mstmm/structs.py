@@ -126,7 +126,7 @@ class Element(ABC):
 
             ``U_global = H @ U_local @ H^T``,  ``H = blkdiag(D, D, D, D)``
 
-        where ``D = self.orientation``. For the default identity orientation this
+        Where ``D = self.orientation``. For the default identity orientation this
         reduces to ``U_local`` exactly, and the rotation is skipped entirely.
 
         Parameters
@@ -180,7 +180,7 @@ class Element(ABC):
 
         An auxiliary input contributes no kinematics of its own: it only carries the
         wrench arriving there across to the output, picking up the lever-arm moment.
-        The result is therefore the static lever transform in the force/moment quadrant
+        The result is therefore the static lever transformation in the force/moment quadrant
         and zero elsewhere.
 
         Parameters
@@ -449,11 +449,11 @@ class ContinuousElement(Element, ABC):
         Notes
         -----
         Evaluated with fixed-order Gauss-Legendre quadrature rather than an adaptive
-        rule. The integrand is a product of two mode shapes -- analytic, and smooth on
+        rule. The integrand is a product of two mode shapes -- analytic and smooth on
         the span -- which is precisely the case where Gauss-Legendre converges
         spectrally, so a fixed order reaches machine precision at a predictable cost.
         An adaptive rule spends most of its budget on error estimation for an integrand
-        that never needed it, and makes the cost of a modal analysis data-dependent.
+        that never needed it and makes the cost of a modal analysis data-dependent.
         """
         input_pos_arr = np.asarray(input_pos, dtype=np.float64)
         output_pos_arr = np.asarray(output_pos, dtype=np.float64)
@@ -506,7 +506,7 @@ class MasslessMixin:
 @dataclass
 class Boundary:
     """
-    A boundary of the system, carrying its partially-known state vector.
+    A boundary of the system, carrying its partially known state vector.
 
     Attributes
     ----------
@@ -530,7 +530,7 @@ class CutPoint:
     b_id1, b_id2 : EntityID
         The two virtual boundaries produced by the cut.
     sign_mat_flag : bool
-        Whether the wrench half of the state vector changes sign across the cut. True
+        Whether the wrench half of the state vector changes its sign across the cut. True
         when the cut produced two input tips facing each other (action and reaction);
         False when it produced a matched output/input pair, whose states are equal.
     mat : Matrix

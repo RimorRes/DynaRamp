@@ -6,16 +6,16 @@ structure that is itself bending under the load. The output is the *initial
 disturbance*: the attitude and body rates the vehicle carries away from the rail, which
 set the dispersion everything downstream has to correct for.
 
-The package is organised around the four sections of the underlying method, and a
+The package is organized around the four sections of the underlying method, and a
 simulation is built by walking through them in order:
 
-| Stage | Package | Question it answers |
-|---|---|---|
-| 1. Structure | `dynaramp.mstmm` | How does the launcher vibrate? |
+| Stage          | Package               | Question it answers                                     |
+|----------------|-----------------------|---------------------------------------------------------|
+| 1. Structure   | `dynaramp.mstmm`      | How does the launcher vibrate?                          |
 | 2. Modal field | `dynaramp.projectile` | Where is the rail at station *x*, and how is it tilted? |
-| 3. Projectile | `dynaramp.projectile` | How does the vehicle move inside the moving rail? |
-| 4. Contact | `dynaramp.contact` | What force passes through the slider–groove clearance? |
-| 5. Coupling | `dynaramp.simulation` | Solve both together, and march in time. |
+| 3. Projectile  | `dynaramp.projectile` | How does the vehicle move inside the moving rail?       |
+| 4. Contact     | `dynaramp.contact`    | What force passes through the slider–groove clearance?  |
+| 5. Coupling    | `dynaramp.simulation` | Solve both together, and march in time.                 |
 
 ---
 
@@ -81,18 +81,18 @@ A runnable version with plotting is in `examples/launch_demo.py`.
 
 ## Frames and sign conventions
 
-Get this wrong and the simulation still runs... but will return plausible nonsense.
+Get this wrong, and the simulation still runs... but will return plausible nonsense.
 
 DynaRamp uses **NED**: `+x` forward (along the rail, toward the muzzle), `+y` right,
 `+z` **down**. Gravity is therefore `(0, 0, +9.81)`, and it seats a shoe on the groove
 *floor*, which is the `+z` face.
 
-| Frame | Meaning |
-|---|---|
-| `K_I` | Inertial. Everything the solver reports is projected here. |
-| `K_R` | Guide reference. Related to `K_I` by `A_IR`, the launcher's attitude. |
-| `K_Pi` | A guide cross-section, tilted with the local bending. Contact lives here. |
-| `K_B` | Projectile body. Origin at **O1**, the rear slider position; `x` toward the nose. |
+| Frame  | Meaning                                                                           |
+|--------|-----------------------------------------------------------------------------------|
+| `K_I`  | Inertial. Everything the solver reports is projected here.                        |
+| `K_R`  | Guide reference. Related to `K_I` by `A_IR`, the launcher's attitude.             |
+| `K_Pi` | A guide cross-section, tilted with the local bending. Contact lives here.         |
+| `K_B`  | Projectile body. Origin at **O1**, the rear slider position; `x` toward the nose. |
 
 Attitude uses intrinsic z-y-x Euler angles `(gamma, psi, phi)` = (yaw, pitch, roll).
 
@@ -119,27 +119,27 @@ topo.cut_connection(...)             # optional hinge-cutting, for branches or l
 topo.add_tip(beam, bc, input_pos=...)    # upstream boundary
 topo.add_root(beam, bc, output_pos=...)  # downstream boundary
 
-topo.make_tree()                     # reduce and validate  <-- mandatory
+topo.make_tree()                     # reduce and validate <-- mandatory
 system = dyn.System(topo)
 ```
 
 **Elements** available in `dynaramp.mstmm`:
 
-| Element | Use |
-|---|---|
-| `EulerBernoulliBeam` | Slender flexible member. The rail itself. |
-| `RigidBody` | Massive stiff component; any number of ports. |
-| `LumpedMass` | Point mass, no rotational inertia. |
+| Element               | Use                                                        |
+|-----------------------|------------------------------------------------------------|
+| `EulerBernoulliBeam`  | Slender flexible member. The rail itself.                  |
+| `RigidBody`           | Massive stiff component; any number of ports.              |
+| `LumpedMass`          | Point mass, no rotational inertia.                         |
 | `SpatialElasticHinge` | Six-DOF spring connection (three linear, three torsional). |
-| `JunctionNode` | Massless branch point. |
+| `JunctionNode`        | Massless branch point.                                     |
 
 Every element takes an optional `orientation`, a 3×3 direction-cosine matrix mapping its
 local frame to `K_R`. Leave it out for anything axis-aligned — the code detects the
 identity once and skips the change of frame entirely.
 
 **Connecting** elements is `topo.connect_elements(src, dst, src_pos, dst_pos)`, where
-each position is a port location *in that element's own local frame*. Ports are created
-implicitly by the call. The first input port an element receives becomes its **main
+each position is a port location *in that element's own local frame*. The call creates ports
+implicitly. The first input port an element receives becomes its **main
 input**, the port its state vector propagates from — worth knowing because mode shapes
 and modal masses are all anchored to it.
 
@@ -173,22 +173,22 @@ change the answer:
 
 - **`omega_max`** — the ceiling of the search. Set it from the physics: modes well above
   the excitation bandwidth contribute nothing but cost.
-- **`search_res`** (default 10000) — sweep resolution. Too coarse and a narrow dip is
-  stepped over and the mode is silently missing from your basis. If a mode count comes
+- **`search_res`** (default 10000) — sweep resolution. Too coarse and a narrow dip will be
+  stepped over; the associated mode will be silently missing from your basis. If a mode count comes
   back lower than expected, raise this before anything else.
 
 `n_modes` counts **distinct eigenfrequencies**, not returned modes. A symmetric structure
 has repeated roots — equal stiffness in `y` and `z` gives a two-dimensional eigenspace at
 one frequency — and every basis vector of it is a physically distinct mode, so
-`len(modes)` can exceed `n_modes`. That is correct behaviour, not a bug.
+`len(modes)` can exceed `n_modes`. That is correct behavior, not a bug.
 
 Zero frequency is excluded from the sweep by design: a root there is a rigid-body
 freedom, not a vibration mode. The element transfer matrices themselves are perfectly
-well defined at `omega = 0`, where they reduce to their static form, so a structure with
+well-defined at `omega = 0`, where they reduce to their static form, so a structure with
 a genuine rigid-body mode can ask for it directly with `system.eigenvectors_at(0.0)`.
 
 For a *forced-response* study rather than a launch simulation, use
-`augmented_modes(system, n)` instead, which adds the orthogonalisation step that
+`augmented_modes(system, n)` instead, which adds the orthogonalization step that
 repeated eigenfrequencies need before the modal equations decouple.
 
 ---
@@ -196,7 +196,7 @@ repeated eigenfrequencies need before the modal equations decouple.
 ## Stage 3 — The modal field
 
 The seam between the structure and the projectile. It relies on modal superposition
-to determine where the **rail**, and how is it tilted, at station (i.e. position along the rail) `x`.
+to determine where the **rail**, and how it is tilted, at station (i.e., position along the rail) `x`.
 
 ```python
 field = GuideModalField.from_elements(system, ["rail"], modes, a_ir=None)
@@ -225,7 +225,7 @@ The **projectile** is inertia plus a list of sliders:
 rocket = Projectile(mass=..., inertia_com=..., com_o1=..., sliders=[...])
 ```
 
-`inertia_com` is about the centre of mass; `com_o1` locates that centre relative to
+`inertia_com` is about the center of mass; `com_o1` locates that center relative to
 **O1**, the rear slider, which is the body-frame origin. Shifting to O1 happens
 internally.
 
@@ -234,11 +234,11 @@ dimensions belong in the profile's clearances instead.
 
 The **profile** is the cross-section the sliders ride in:
 
-| Profile | Geometry | Exponent |
-|---|---|---|
-| `RailProfile` | Rectangular groove, flat T-shoe: two side walls, floor, top lip | `1.0`, conformal |
-| `CanisterProfile` | Slot in a canister wall, spherical slider: two flanks + deep end | `1.5`, Hertzian |
-| `StationVaryingProfile` | Delegates to a different profile per station | — |
+| Profile                 | Geometry                                                         | Exponent         |
+|-------------------------|------------------------------------------------------------------|------------------|
+| `RailProfile`           | Rectangular groove, flat T-shoe: two side walls, floor, top lip  | `1.0`, conformal |
+| `CanisterProfile`       | Slot in a canister wall, spherical slider: two flanks + deep end | `1.5`, Hertzian  |
+| `StationVaryingProfile` | Delegates to a different profile per station                     | —                |
 
 Match the **stiffness helper to the exponent**: `linear_contact_stiffness` with `n = 1`,
 `hertz_stiffness` with `n = 1.5`.
@@ -246,7 +246,7 @@ Match the **stiffness helper to the exponent**: `linear_contact_stiffness` with 
 > **Note: the stiffness is the parameter that will cost you time.** A true steel-on-steel
 > contact stiffness is enormous, and with an explicit fixed-step integrator it forces a
 > step small enough to make the run impractical. Choose the softest penalty for which
-> peak penetration stays a small fraction of the clearance, and check that it did.
+> peak penetration stays a small fraction of the clearance and check that it did.
 
 The **solver** ties them together:
 
@@ -257,7 +257,7 @@ solver = ContactSolver(field, profile, rocket.sliders, l_c=length)
 `l_c` is the exit station — where a slider leaves the guide. A **scalar** gives every
 slider the same exit, so the front shoe releases first and then the rear: sequential
 detachment, and the dominant source of the launch disturbance. A **sequence**, one entry
-per slider, lets them release **independently** (simultaneously for example), 
+per slider, lets them release **independently** (simultaneously, for example), 
 as a groove that widens toward the muzzle would do.
 > **Note:** Setting the exit station `l_c` changes the character of the result more than almost
 > anything else in the model.
@@ -300,13 +300,13 @@ finished the launch**, and its final attitude is not the exit attitude.
 ### Reading the result
 
 ```python
-result.t                  # (steps,)     time
-result.x                  # (steps, 6)   configuration
-result.y                  # (steps, 6)   quasi-velocity
-result.p                  # (steps, n)   rail modal coordinates
-result.attitude           # (steps, 3)   == x[:, 3:6], degrees via np.degrees
-result.angular_velocity   # (steps, 3)   == y[:, 3:6]
-result.contact_force      # (steps, 3)   resultant on the projectile at O1
+result.t                  # (steps,) time
+result.x                  # (steps, 6) configuration
+result.y                  # (steps, 6) quasi-velocity
+result.p                  # (steps, n) rail modal coordinates
+result.attitude           # (steps, 3) == x[:, 3:6], degrees via np.degrees
+result.angular_velocity   # (steps, 3) == y[:, 3:6]
+result.contact_force      # (steps, 3) resultant on the projectile at O1
 result.contact_moment     # (steps, 3)
 ```
 
@@ -352,16 +352,16 @@ class Drag:
 
 ## Troubleshooting
 
-| Symptom | Cause |
-|---|---|
-| `RuntimeError: tree must be generated` | `make_tree()` not called. |
-| `ValueError: under-constrained or over-constrained` | Boundary `None` count does not match the unknowns. |
-| Fewer modes than expected | `search_res` too coarse, or `omega_max` too low. |
-| `Propagated state doesn't match root boundary state` | Usually a genuinely inconsistent topology or boundary set. |
-| `Non-positive modal mass` | The mode set is not a valid basis — often a spurious mode from too loose an `rtol`. |
-| Contact force oscillates and grows | `dt` too large for the contact stiffness, or the stiffness is unphysically high. |
-| `exited=False` | The projectile never left the rail: `t_max` too short, or thrust too low. |
-| Result changes when `step` changes | Finite-difference step off its optimum; leave `step=None`. |
+| Symptom                                              | Cause                                                                               |
+|------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `RuntimeError: tree must be generated`               | `make_tree()` not called.                                                           |
+| `ValueError: under-constrained or over-constrained`  | Boundary `None` count does not match the unknowns.                                  |
+| Fewer modes than expected                            | `search_res` too coarse, or `omega_max` too low.                                    |
+| `Propagated state doesn't match root boundary state` | Usually a genuinely inconsistent topology or boundary set.                          |
+| `Non-positive modal mass`                            | The mode set is not a valid basis — often a spurious mode from too loose an `rtol`. |
+| Contact force oscillates and grows                   | `dt` too large for the contact stiffness, or the stiffness is unphysically high.    |
+| `exited=False`                                       | The projectile never left the rail: `t_max` too short, or thrust too low.           |
+| Result changes when `step` changes                   | Finite-difference step off its optimum; leave `step=None`.                          |
 
 Logging is per-module under the `dynaramp` namespace, so
 `logging.getLogger("dynaramp.simulation").setLevel(logging.INFO)` gives run progress

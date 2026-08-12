@@ -94,7 +94,7 @@ class UniformProfile(GuideProfile, ABC):
     """
     Base class for a guide whose cross-section and contact parameters are constant.
 
-    Holds the material and contact-law parameters shared by every face of the section,
+    Holds the material and contact-law parameters shared by every face of the section
     and builds the :class:`SurfaceContact` records from them. A concrete subclass then
     only has to express its own geometry: which faces exist, and how far the slider has
     penetrated each. This is the same template-method split that
@@ -340,7 +340,7 @@ class StationVaryingProfile(GuideProfile):
     """
     A guide whose cross-section changes along its length.
 
-    Delegates to a profile chosen per axial station. This models, for example, a rail
+    Delegates to a profile chosen for each axial station. This models, for example, a rail
     groove that widens from the rear to the front so that sliders progressively -- or
     simultaneously -- disengage as the projectile advances.
 
