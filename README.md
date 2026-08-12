@@ -13,11 +13,16 @@ Matrix Method** (MSTMM, after Rui), coupled to a penalty contact model with clea
 
 ## Installation
 
+Requires Python 3.12+.
+
+### For users
+```bash
+pip install dynaramp
+```
+### For developers
 ```bash
 pip install -e .
 ```
-
-Requires Python 3.12+.
 
 ## Quick start
 
@@ -40,14 +45,14 @@ parameters that actually change the answer.
 
 ## Package layout
 
-| Package | Contents |
-|---|---|
-| `dynaramp.common` | Vector/frame maths, shared modal helpers, type aliases |
-| `dynaramp.materials` | Isotropic linear-elastic materials and presets |
-| `dynaramp.mstmm` | Elements, topology, the transfer-matrix eigenproblem, forced response |
-| `dynaramp.projectile` | Guide modal field, projectile kinematics and equations of motion |
-| `dynaramp.contact` | Guide cross-sections, slider contact detection, contact solver |
-| `dynaramp.simulation` | Coupled assembly, external loads, time integration |
+| Package               | Contents                                                              |
+|-----------------------|-----------------------------------------------------------------------|
+| `dynaramp.common`     | Vector/frame maths, shared modal helpers, type aliases                |
+| `dynaramp.materials`  | Isotropic linear-elastic materials and presets                        |
+| `dynaramp.mstmm`      | Elements, topology, the transfer-matrix eigenproblem, forced response |
+| `dynaramp.projectile` | Guide modal field, projectile kinematics and equations of motion      |
+| `dynaramp.contact`    | Guide cross-sections, slider contact detection, contact solver        |
+| `dynaramp.simulation` | Coupled assembly, external loads, time integration                    |
 
 ## Conventions
 
@@ -63,5 +68,5 @@ before setting canister clearances.
 ## References
 
 - Rui, X. et al., *Transfer Matrix Method for Multibody Systems: Theory and Applications*
-- *Modeling and simulation framework for missile launch dynamics in a rigid–flexible
+- Liu, Z. et al., *Modeling and simulation framework for missile launch dynamics in a rigid–flexible
   multibody system with slider–guide clearance*
