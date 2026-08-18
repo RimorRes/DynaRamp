@@ -26,7 +26,7 @@ e_mod = 210e9  # elastic modulus, Pa
 sma = b * h ** 3 / 12  # second moment of area, m^4
 length = 518 * 25.4e-3 # length, m
 Beam = EulerBernoulliBeam(mu, e_mod, sma, length)
-Rail = LaunchRail(Beam, n_modes=5, angle=np.pi / 4)
+Rail = LaunchRail(Beam, n_modes=5, angle=np.deg2rad(75))
 
 # Black Brandt X approximate parameters
 Motor = SimpleMotor(thrust=257e3, isp=280)
@@ -42,7 +42,7 @@ com = (438.92/2) * 25.4e-3
 World_ref = Basis()
 Rocket = RigidRocket2D(parent_basis=World_ref, motor=Motor, mass=mass, inertia=inertia)
 Rocket.add_shoe(rel_pos=np.array([lug2 - com, r]), friction_coef=0.5, release_point=Rail.beam.L)
-Rocket.add_shoe(rel_pos=np.array([lug1 - com, r]), friction_coef=0.5, release_point=Rail.beam.L-(lug2 - lug1))
+Rocket.add_shoe(rel_pos=np.array([lug1 - com, r]), friction_coef=0.5, release_point=Rail.beam.L)
 
 Sys = System(Rail, Rocket)
 
@@ -75,7 +75,7 @@ print("-"*40)
 for shoe in Rocket.shoes:
     print(f"Shoe at dk={shoe.dk:.2f} m:  release point={shoe.x_release:.2f} m")
 print("-"*40)
-print("Natural frequencies", Beam.omegas)
+print("Natural frequencies (rad/s)", Beam.omegas)
 print('='*40)
 print("Starting static equilibrium")
 print(f"equili.  s={q0[0]:.4f}  y={q0[1]:.6f}  theta={q0[2]:.6f}  w(L)={w0*1000:.2f} mm")
@@ -89,7 +89,7 @@ exit_theta = 0
 exit_theta_dot = 0
 exit_vel = 0
 
-t_step = 0.005
+t_step = 1e-4
 for t_val, vals in enumerate(nnr_solver(
         m=Sys.M,
         c=Sys.C,
@@ -110,8 +110,9 @@ for t_val, vals in enumerate(nnr_solver(
     q_arr.append(q)
     q_dot_arr.append(q_dot)
 
-    print(f"t={current_time:.3f}  s={q[0]:.3f} m  y={q[1]:.3f} m  theta={np.degrees(q[2]):.3f}° "
-          f"∆w(L)={(w-w0)*1e3:.3f} mm  shoes={active_shoe_count}")
+    if current_time/t_step % 100 == 0:
+        print(f"t={current_time:.3f}  s={q[0]:.3f} m  y={q[1]:.3f} m  theta={np.degrees(q[2]):.3f}° "
+              f"∆w(L)={(w-w0)*1e3:.3f} mm  shoes={active_shoe_count}")
 
     if active_shoe_count == 0 and not ffa:
         print("Free flight!")

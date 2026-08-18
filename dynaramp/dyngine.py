@@ -48,6 +48,7 @@ class System:
         jax_shapes = self.ramp.jax_modal_shapes
         k_beam = jnp.array(self.ramp.K)
         n_modes = self.ramp.n_modes
+        dphi = [jax.grad(phi) for phi in jax_shapes]
 
         def f_int(q):
             s = q[0]
@@ -64,14 +65,15 @@ class System:
                 is_active = x_k <= shoe.x_release
                 # Beam transverse deflection at contact (modal expansion)
                 w_k = sum(eta[i] * jax_shapes[i](x_k) for i in range(n_modes))
+                dw_k = sum(eta[i] * dphi[i](x_k) for i in range(n_modes))
                 # Spring deformation: extension = rail_y − shoe_tip_y − l0
                 # shoe_tip_y ≈ y + rk + dk·θ  (rocket hangs below rail, y up)
                 delta_k = w_k - y - shoe.rk - shoe.dk * theta - shoe.l0
                 n_k = jnp.where(is_active, shoe.spring_const * delta_k, 0.0)
 
-                # f_int[y] = ∂V/∂y = Nk · ∂δ/∂y = Nk · (−1) = −Nk
+                f = f.at[0].add(n_k * dw_k)
                 f = f.at[1].add(-n_k)
-                f = f.at[2].add(-shoe.dk * n_k)
+                f = f.at[2].add(-n_k * (shoe.dk + shoe.rk * dw_k))
                 for i in range(n_modes):
                     f = f.at[3 + i].add(jax_shapes[i](x_k) * n_k)
 
