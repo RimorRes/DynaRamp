@@ -94,7 +94,7 @@ class UniformProfile(GuideProfile, ABC):
     """
     Base class for a guide whose cross-section and contact parameters are constant.
 
-    Holds the material and contact-law parameters shared by every face of the section
+    Holds the material and contact-law parameters shared by every face of the section,
     and builds the :class:`SurfaceContact` records from them. A concrete subclass then
     only has to express its own geometry: which faces exist, and how far the slider has
     penetrated each. This is the same template-method split that
@@ -336,11 +336,101 @@ class CanisterProfile(UniformProfile):
         return out
 
 
+class OffsetProfile(GuideProfile):
+    """
+    Relocates a profile's datum within the cross-section, optionally mirroring it.
+
+    A :class:`UniformProfile` describes a groove centered on the origin of the
+    cross-section frame K_Pi. That origin is the guide's *central axis*, so a guide with
+    its grooves cut into the side walls -- one at ``+y``, one at ``-y`` -- cannot be
+    described by that profile alone: each groove has its own datum, and the two are
+    mirror images.
+
+    This wrapper supplies the missing piece. It is the ``Pi_r_PiWi`` offset of the source
+    formulation (Rui/Liu Eq. 53): the constant vector from the cross-section origin to
+    the groove's own reference point, against which penetrations are measured.
+
+    Parameters
+    ----------
+    profile : GuideProfile
+        The groove profile, expressed about its own datum.
+    offset : VectorLike
+        Position of the groove datum in K_Pi -- where the slider's reference point sits
+        when the groove is nominally centered on it.
+    mirror_y : bool
+        Negate the lateral axis, so a profile written for a ``+y`` groove serves the
+        ``-y`` one. Normals are mirrored back on the way out.
+    mirror_z : bool
+        Negate the vertical axis. Rarely needed: a two-sided vertical constraint is
+        already symmetric.
+
+    Examples
+    --------
+    A canister with grooves in both side walls, sliders seated at ``y = +/-0.055``::
+
+        groove = CanisterProfile(clearance_y=..., clearance_z=..., ...)
+        right = OffsetProfile(groove, offset=(0.0, 0.055, 0.0))
+        left = OffsetProfile(groove, offset=(0.0, -0.055, 0.0), mirror_y=True)
+    """
+
+    def __init__(
+            self,
+            profile: GuideProfile,
+            offset: VectorLike = (0.0, 0.0, 0.0),
+            mirror_y: bool = False,
+            mirror_z: bool = False,
+    ):
+        self.profile = profile
+        self.offset = np.asarray(offset, dtype=np.float64).reshape(3)
+        self.mirror_y = bool(mirror_y)
+        self.mirror_z = bool(mirror_z)
+        # Diagonal sign matrix; its own inverse, so it maps positions in and normals out.
+        self._sign = np.array(
+            [1.0, -1.0 if self.mirror_y else 1.0, -1.0 if self.mirror_z else 1.0],
+            dtype=np.float64,
+        )
+
+    def contacts(self, r_vi: Vector, radius: float = 0.0, station: float = 0.0) -> List[SurfaceContact]:
+        """
+        Delegate with the datum shifted, mirroring the returned normals back.
+
+        Parameters
+        ----------
+        r_vi : Vector
+            The slider's reference point in K_Pi.
+        radius : float
+            Slider ball-head radius, forwarded to the delegate.
+        station : float
+            Axial station, forwarded to the delegate.
+
+        Returns
+        -------
+        List[SurfaceContact]
+            The delegate's contacts, with normals expressed back in K_Pi.
+        """
+        local = self._sign * (np.asarray(r_vi, dtype=np.float64) - self.offset)
+        found = self.profile.contacts(local, radius=radius, station=station)
+        if not self.mirror_y and not self.mirror_z:
+            return found
+        return [
+            SurfaceContact(
+                label=s.label,
+                penetration=s.penetration,
+                normal=self._sign * s.normal,
+                stiffness=s.stiffness,
+                exponent=s.exponent,
+                restitution=s.restitution,
+                friction=s.friction,
+            )
+            for s in found
+        ]
+
+
 class StationVaryingProfile(GuideProfile):
     """
     A guide whose cross-section changes along its length.
 
-    Delegates to a profile chosen for each axial station. This models, for example, a rail
+    Delegates to a profile chosen per axial station. This models, for example, a rail
     groove that widens from the rear to the front so that sliders progressively -- or
     simultaneously -- disengage as the projectile advances.
 

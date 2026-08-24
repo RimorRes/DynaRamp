@@ -63,7 +63,7 @@ class ElementInfo:
     output_port : PortInfo
         The element's single output port.
     upstream_tips : List[EntityID]
-        Tip boundaries that feed this element (can be indirect).
+        Tip boundaries that feed this element, however indirectly.
     downstream : EntityID
         Successor node the output port feeds into.
     main_input_pred : EntityID
@@ -105,9 +105,9 @@ class PropagationStep:
     """
     One element traversal along a path, with all of its geometry already resolved.
 
-    A path from a tip to the root is fixed by the topology and so is the port geometry
+    A path from a tip to the root is fixed by the topology, and so is the port geometry
     of every element along it. Only the frequency changes between sweeps, so resolving
-    the ports once turns the transfer-matrix assembly into a flat loop with no graph lookups.
+    the ports once turns transfer-matrix assembly into a flat loop with no graph lookups.
 
     Attributes
     ----------
@@ -131,7 +131,7 @@ class TopologyHandler:
     """
     Builder and owner of a multibody system's connection topology.
 
-    Elements are registered, wired together, and terminated with boundaries; then
+    Elements are registered, wired together and terminated with boundaries, then
     :meth:`make_tree` reduces the resulting graph to the tree that the transfer matrix
     method requires, cutting any extra connections and recording the cut relations.
     """
@@ -707,7 +707,7 @@ class TopologyHandler:
         Cut a connection, replacing it with a pair of virtual boundaries.
 
         "Cutting the hinge": generates virtual tips to account for multi-output or
-        looping elements and records the relation between the two new boundaries so
+        looping elements, and records the relation between the two new boundaries so
         the overall transfer equation can recombine them.
 
         Parameters
@@ -789,7 +789,7 @@ class TopologyHandler:
 
     def find_cuts(self) -> List[Tuple[EntityID, EntityID]]:
         """
-        Identify the connections that must be removed to get a tree system.
+        Identify the connections that must be removed to obtain a tree system.
 
         A valid and unique root must already have been selected.
 
@@ -878,7 +878,7 @@ class TopologyHandler:
         z.setflags(write=False)  # Make the array read-only
         self._z_all = z  # Overwrite cache
 
-        # Topology keys path and plan caches, so they die with it.
+        # Path and plan caches are keyed by topology, so they die with it.
         self._path_cache = {}
         self._plan_cache = {}
 
@@ -914,7 +914,7 @@ class TopologyHandler:
                 logger.critical(err_msg)
                 raise RuntimeError(err_msg)
 
-            # Resolve the main input's predecessor a single time. This used to be a predecessor scan
+            # Resolve the main input's predecessor once. This used to be a predecessor scan
             # performed on every mode-shape and modal-mass query.
             try:
                 main_pred = next(

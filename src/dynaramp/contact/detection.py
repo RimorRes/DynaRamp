@@ -102,7 +102,7 @@ def contact_station(
     Solve Eq. 55 for the contact station ``x_R,i``.
 
     The axial station where the vector from the cross-section to the slider center V_i
-    is perpendicular to the cross-section normal ``e^Pi_x``, i.e., where
+    is perpendicular to the cross-section normal ``e^Pi_x``, i.e. where
     ``g(x) = (I_r_Vi - I_r_Pi(x)) . e^Pi_x(x) = 0``. Uses a bracketed root find about the
     nominal station.
 

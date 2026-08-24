@@ -20,9 +20,9 @@ def hertz_stiffness(radius: float, material_a: Material, material_b: Material) -
     radius : float
         Ball-head radius ``R`` of the slider [m].
     material_a : Material
-        Material of one contacting body, e.g., the slider.
+        Material of one contacting body, e.g. the slider.
     material_b : Material
-        Material of the other, e.g., the guide.
+        Material of the other, e.g. the guide.
 
     Returns
     -------
@@ -81,7 +81,7 @@ def linear_contact_stiffness(
 
     Notes
     -----
-    Unlike the Hertzian sphere-plane case, there is no unique stiffness for conformal
+    Unlike the Hertzian sphere-plane case there is no unique stiffness for conformal
     contact; the compliance length is a modeling choice, roughly the depth of material
     that deforms. Pick ``K`` large enough that the peak penetration stays a small
     fraction of the clearance, but no larger -- an over-stiff penalty makes an explicit
@@ -139,7 +139,7 @@ def normal_force(
 
     Notes
     -----
-    Returns zero when there is no penetration and never returns a negative (adhesive)
+    Returns zero when there is no penetration, and never returns a negative (adhesive)
     force. When the impact velocity is zero -- quasi-static contact -- the damping term
     is dropped.
     """

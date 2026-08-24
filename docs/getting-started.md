@@ -9,13 +9,21 @@ set the dispersion everything downstream has to correct for.
 The package is organized around the four sections of the underlying method, and a
 simulation is built by walking through them in order:
 
-| Stage          | Package               | Question it answers                                     |
-|----------------|-----------------------|---------------------------------------------------------|
-| 1. Structure   | `dynaramp.mstmm`      | How does the launcher vibrate?                          |
+| Stage | Package | Question it answers |
+|---|---|---|
+| 1. Structure | `dynaramp.mstmm` | How does the launcher vibrate? |
 | 2. Modal field | `dynaramp.projectile` | Where is the rail at station *x*, and how is it tilted? |
-| 3. Projectile  | `dynaramp.projectile` | How does the vehicle move inside the moving rail?       |
-| 4. Contact     | `dynaramp.contact`    | What force passes through the slider–groove clearance?  |
-| 5. Coupling    | `dynaramp.simulation` | Solve both together, and march in time.                 |
+| 3. Projectile | `dynaramp.projectile` | How does the vehicle move inside the moving rail? |
+| 4. Contact | `dynaramp.contact` | What force passes through the slider–groove clearance? |
+| 5. Coupling | `dynaramp.simulation` | Solve both together, and march in time. |
+
+The mental model worth carrying: the rail is a **guitar string**, the projectile is a
+**bead threaded loosely onto it**. The bead's weight and thrust make the string flex;
+the flexing string throws the bead around; the bead rattles inside the clearance of its
+own hole. None of those three can be solved without the other two, which is what
+"coupled" means here. Stage 1 works out the string's natural notes once, and everything
+after that is expressed as a blend of those notes — which is what makes the problem
+small enough to integrate.
 
 ---
 
@@ -69,8 +77,8 @@ forces = [Gravity(g=(0.0, 0.0, G0)),
           Thrust(curve=lambda t: 285e3 * min(1.0, t / 0.1))]
 sim = LaunchSimulator(field, rocket, solver, forces=forces, rayleigh=(2.0, 1e-5))
 
-x0 = np.array([0.2, 0.0, 5.5e-4, 0.0, 0.0, 0.0])
-result = sim.run(x0, np.zeros(6), dt=1e-4, t_max=0.7)
+x0, p0 = sim.equilibrium_state(x_r=0.2)          # start from rest, not from a straight rail
+result = sim.run(x0, np.zeros(6), dt=1e-4, t_max=0.7, p0=p0)
 
 print(np.degrees(result.attitude[-1]), np.degrees(result.angular_velocity[-1]))
 ```
@@ -81,25 +89,26 @@ A runnable version with plotting is in `examples/launch_demo.py`.
 
 ## Frames and sign conventions
 
-Get this wrong, and the simulation still runs... but will return plausible nonsense.
+Get this wrong and the simulation still runs, returning plausible nonsense. It is worth
+thirty seconds.
 
 DynaRamp uses **NED**: `+x` forward (along the rail, toward the muzzle), `+y` right,
 `+z` **down**. Gravity is therefore `(0, 0, +9.81)`, and it seats a shoe on the groove
 *floor*, which is the `+z` face.
 
-| Frame  | Meaning                                                                           |
-|--------|-----------------------------------------------------------------------------------|
-| `K_I`  | Inertial. Everything the solver reports is projected here.                        |
-| `K_R`  | Guide reference. Related to `K_I` by `A_IR`, the launcher's attitude.             |
-| `K_Pi` | A guide cross-section, tilted with the local bending. Contact lives here.         |
-| `K_B`  | Projectile body. Origin at **O1**, the rear slider position; `x` toward the nose. |
+| Frame | Meaning |
+|---|---|
+| `K_I` | Inertial. Everything the solver reports is projected here. |
+| `K_R` | Guide reference. Related to `K_I` by `A_IR`, the launcher's attitude. |
+| `K_Pi` | A guide cross-section, tilted with the local bending. Contact lives here. |
+| `K_B` | Projectile body. Origin at **O1**, the rear slider position; `x` toward the nose. |
 
 Attitude uses intrinsic z-y-x Euler angles `(gamma, psi, phi)` = (yaw, pitch, roll).
 
-> **Caution:** If you are transcribing a test case using another coordinate system,
-> please note that you will have to convert to the right-handed NED frame
-> described above, which is the same as the body frame of a conventional aircraft.
-> Notable traps will be pitch/yaw/roll angles, geometry, direction of forces etc...
+> **If you are transcribing from the source paper**, note that its frame is
+> (+x forward, +y up, +z right) and it labels `gamma`/`psi` as pitch/yaw. The
+> `CanisterProfile` clearances are the trap: the paper's `c_y` is the *vertical* gap and
+> belongs in `clearance_z`, its `c_z` is the *lateral* gap and belongs in `clearance_y`.
 
 ---
 
@@ -110,36 +119,30 @@ Three objects, always in this order: elements, then a topology wiring them, then
 
 ```python
 topo = dyn.TopologyHandler()
-
-topo.add_elements(beam)              # register elements
-...                                  # recreate the topology by connecting them
-topo.connect_elements(...)
-topo.cut_connection(...)             # optional hinge-cutting, for branches or loops
-...
+topo.add_elements(beam)              # register
 topo.add_tip(beam, bc, input_pos=...)    # upstream boundary
 topo.add_root(beam, bc, output_pos=...)  # downstream boundary
-
-topo.make_tree()                     # reduce and validate <-- mandatory
+topo.make_tree()                     # reduce and validate  <-- mandatory
 system = dyn.System(topo)
 ```
 
 **Elements** available in `dynaramp.mstmm`:
 
-| Element               | Use                                                        |
-|-----------------------|------------------------------------------------------------|
-| `EulerBernoulliBeam`  | Slender flexible member. The rail itself.                  |
-| `RigidBody`           | Massive stiff component; any number of ports.              |
-| `LumpedMass`          | Point mass, no rotational inertia.                         |
+| Element | Use |
+|---|---|
+| `EulerBernoulliBeam` | Slender flexible member. The rail itself. |
+| `RigidBody` | Massive stiff component; any number of ports. |
+| `LumpedMass` | Point mass, no rotational inertia. |
 | `SpatialElasticHinge` | Six-DOF spring connection (three linear, three torsional). |
-| `JunctionNode`        | Massless branch point.                                     |
+| `JunctionNode` | Massless branch point. |
 
 Every element takes an optional `orientation`, a 3×3 direction-cosine matrix mapping its
 local frame to `K_R`. Leave it out for anything axis-aligned — the code detects the
 identity once and skips the change of frame entirely.
 
 **Connecting** elements is `topo.connect_elements(src, dst, src_pos, dst_pos)`, where
-each position is a port location *in that element's own local frame*. The call creates ports
-implicitly. The first input port an element receives becomes its **main
+each position is a port location *in that element's own local frame*. Ports are created
+implicitly by the call. The first input port an element receives becomes its **main
 input**, the port its state vector propagates from — worth knowing because mode shapes
 and modal masses are all anchored to it.
 
@@ -173,8 +176,8 @@ change the answer:
 
 - **`omega_max`** — the ceiling of the search. Set it from the physics: modes well above
   the excitation bandwidth contribute nothing but cost.
-- **`search_res`** (default 10000) — sweep resolution. Too coarse and a narrow dip will be
-  stepped over; the associated mode will be silently missing from your basis. If a mode count comes
+- **`search_res`** (default 10000) — sweep resolution. Too coarse and a narrow dip is
+  stepped over and the mode is silently missing from your basis. If a mode count comes
   back lower than expected, raise this before anything else.
 
 `n_modes` counts **distinct eigenfrequencies**, not returned modes. A symmetric structure
@@ -184,19 +187,61 @@ one frequency — and every basis vector of it is a physically distinct mode, so
 
 Zero frequency is excluded from the sweep by design: a root there is a rigid-body
 freedom, not a vibration mode. The element transfer matrices themselves are perfectly
-well-defined at `omega = 0`, where they reduce to their static form, so a structure with
+well defined at `omega = 0`, where they reduce to their static form, so a structure with
 a genuine rigid-body mode can ask for it directly with `system.eigenvectors_at(0.0)`.
 
 For a *forced-response* study rather than a launch simulation, use
 `augmented_modes(system, n)` instead, which adds the orthogonalization step that
 repeated eigenfrequencies need before the modal equations decouple.
 
----
+> **Use `augmented_modes` whenever the structure is symmetric.** A square or circular
+> section has `I_y == I_z`, so every bending mode arrives as a y/z pair at one frequency.
+> `natural_modes` returns both vectors, but they are only orthonormal in Rⁿ — not in the
+> augmented inner product — so the modal equations do not actually decouple and the
+> projected loads are wrong. The launch canister of `examples/liu_6_3_validation.py` is
+> exactly this case.
+
+### Starting from equilibrium
+
+A run started from a straight, unloaded guide is not starting from rest. The guide is
+already carrying the projectile's weight, so releasing it at `t = 0` rings it at its own
+natural frequencies — a transient that is an artifact of the initial condition and that
+lands on exactly the early record a launch study cares about.
+
+`LaunchSimulator.equilibrium_state` solves it away, which is the initialization Liu et al.
+perform in their Eq. (12):
+
+```python
+x0, p0 = sim.equilibrium_state(x_r=0.2)      # configuration + vehicle modal coordinates
+result = sim.run(x0, np.zeros(6), dt=1e-4, t_max=0.7, p0=p0)
+```
+
+It returns the configuration and the modal coordinates at which every acceleration
+vanishes; the matching velocities are zero. On the demo rail this cuts the contact-force
+ripple over the first 60 ms from 21 kN peak-to-peak to 0.4 kN, and the pitch swing from
+3.8 to 0.04 mdeg.
+
+The axial direction is deliberately excluded — a projectile under thrust has no axial
+equilibrium — so the solve covers the five transverse and angular coordinates plus the
+`n` modal ones.
+
+Two things make this solve harder than it looks, and both are handled internally but are
+worth knowing about when it fails:
+
+- **Contact is flat until it isn't.** Contact forces are identically zero until a face is
+  penetrated, so while the projectile floats free the residual has *no gradient at all*
+  and Newton cannot start. A marching phase with a geometrically growing step crosses the
+  clearance first. If you see `Relaxation never reached contact`, pass an `x_guess`
+  already resting against a face.
+- **The problem is often rank-deficient.** A projectile whose sliders all lie on its own
+  axis has nothing resisting roll, so roll is a true null direction; an unregularized
+  solve will send it to infinity while reporting a perfect residual. A weak Tikhonov term
+  pins null directions at their seed values.
 
 ## Stage 3 — The modal field
 
-The seam between the structure and the projectile. It relies on modal superposition
-to determine where the **rail**, and how it is tilted, at station (i.e., position along the rail) `x`.
+The seam between the structure and the projectile. It turns "mode 3 of this beam" into
+"where is the rail, and how is it tilted, at station `x`".
 
 ```python
 field = GuideModalField.from_elements(system, ["rail"], modes, a_ir=None)
@@ -206,13 +251,15 @@ field = GuideModalField.from_elements(system, ["rail"], modes, a_ir=None)
   collinear. Use the `GuideSegment` form when a segment's length is not readable from
   the element.
 - **`a_ir`** is the launcher's attitude — elevation and azimuth — as a 3×3 matrix.
-  Default identity means upright and aligned with `K_I`.
+  Default identity means upright and aligned with `K_I`. This is where a real launcher's
+  pointing goes.
 - **`step`** is the finite-difference step for the spatial derivatives. Leave it `None`.
   The default selects `optimal_step()`, which balances truncation against round-off; a
-  hand-picked value may be *less* accurate, as the second-derivative stencil divides by `h²`.
+  hand-picked "small" value such as `1e-4` is roughly a thousand times *less* accurate,
+  because the second-derivative stencil divides by `h²`.
 
 `field.n_modes`, `field.total_length` and `field.evaluate(x)` are the things you will
-interact with. Note the field also carries the `system` and `modes`, which is why later stages
+touch. Note the field also carries the `system` and `modes`, which is why later stages
 only need the field.
 
 ---
@@ -234,19 +281,36 @@ dimensions belong in the profile's clearances instead.
 
 The **profile** is the cross-section the sliders ride in:
 
-| Profile                 | Geometry                                                         | Exponent         |
-|-------------------------|------------------------------------------------------------------|------------------|
-| `RailProfile`           | Rectangular groove, flat T-shoe: two side walls, floor, top lip  | `1.0`, conformal |
-| `CanisterProfile`       | Slot in a canister wall, spherical slider: two flanks + deep end | `1.5`, Hertzian  |
-| `StationVaryingProfile` | Delegates to a different profile per station                     | —                |
+| Profile | Geometry | Exponent |
+|---|---|---|
+| `RailProfile` | Rectangular groove, flat T-shoe: two side walls, floor, top lip | `1.0`, conformal |
+| `CanisterProfile` | Slot in a canister wall, spherical slider: two flanks + deep end | `1.5`, Hertzian |
+| `OffsetProfile` | Relocates (and optionally mirrors) another profile's datum | — |
+| `StationVaryingProfile` | Delegates to a different profile per station | — |
+
+A profile describes a groove centered on the cross-section origin — the guide's *central
+axis*. A guide with grooves cut into both side walls therefore needs `OffsetProfile`, one
+per side, to put each groove at its own datum and mirror the left one:
+
+```python
+groove = CanisterProfile(clearance_y=..., clearance_z=..., ...)
+profiles = [
+    OffsetProfile(groove, offset=(0.0, s.position[1], 0.0), mirror_y=s.position[1] < 0)
+    for s in missile.sliders
+]
+solver = ContactSolver(field, profiles, missile.sliders, l_c=...)   # one per slider
+```
+
+`ContactSolver` accepts either a single profile for every slider or a sequence of one
+each.
 
 Match the **stiffness helper to the exponent**: `linear_contact_stiffness` with `n = 1`,
 `hertz_stiffness` with `n = 1.5`.
 
-> **Note: the stiffness is the parameter that will cost you time.** A true steel-on-steel
+> **The stiffness is the parameter that will cost you time.** A true steel-on-steel
 > contact stiffness is enormous, and with an explicit fixed-step integrator it forces a
 > step small enough to make the run impractical. Choose the softest penalty for which
-> peak penetration stays a small fraction of the clearance and check that it did.
+> peak penetration stays a small fraction of the clearance, and check that it did.
 
 The **solver** ties them together:
 
@@ -257,10 +321,9 @@ solver = ContactSolver(field, profile, rocket.sliders, l_c=length)
 `l_c` is the exit station — where a slider leaves the guide. A **scalar** gives every
 slider the same exit, so the front shoe releases first and then the rear: sequential
 detachment, and the dominant source of the launch disturbance. A **sequence**, one entry
-per slider, lets them release **independently** (simultaneously, for example), 
-as a groove that widens toward the muzzle would do.
-> **Note:** Setting the exit station `l_c` changes the character of the result more than almost
-> anything else in the model.
+per slider, lets them release simultaneously, as a groove that widens toward the muzzle
+would do. This single argument changes the character of the result more than almost
+anything else in the model.
 
 ---
 
@@ -274,8 +337,8 @@ sim = LaunchSimulator(field, rocket, solver, forces=forces, rayleigh=(2.0, 1e-5)
 result = sim.run(x0, y0, dt=1e-4, t_max=0.7)
 ```
 
-`rayleigh` offers Rayleigh damping using `(alpha, beta)` in `C = alpha M + beta K`, 
-giving each mode `c_p = alpha + beta omega_p²`.
+`rayleigh` is `(alpha, beta)` in `C = alpha M + beta K`, giving each mode
+`c_p = alpha + beta omega_p²`.
 
 The initial state is two 6-vectors:
 
@@ -285,9 +348,9 @@ The initial state is two 6-vectors:
   derivative. They are related by `y = H(gamma, psi) x_dot`; if you have rates, use
   `ProjectileState.from_config_rates(x, x_dot).y`.
 
-Start the projectile *seated*, not floating: set `z_L` just past `bottom_clearance` so
-the shoes rest on the groove floor as they would under gravity. Starting it centred in
-the clearance produces a spurious settling transient at `t = 0`.
+Get `x0` and `p0` from `equilibrium_state` rather than by hand (see *Starting from
+equilibrium* above). Hand-picking them means guessing where in the clearance the
+projectile sits and leaving the guide undeflected, both of which inject a transient.
 
 `dt` must resolve the contact stiffness, which is the stiffest thing in the system. If
 the contact force history shows growing oscillation, the step is too large — halve it
@@ -300,13 +363,13 @@ finished the launch**, and its final attitude is not the exit attitude.
 ### Reading the result
 
 ```python
-result.t                  # (steps,) time
-result.x                  # (steps, 6) configuration
-result.y                  # (steps, 6) quasi-velocity
-result.p                  # (steps, n) rail modal coordinates
-result.attitude           # (steps, 3) == x[:, 3:6], degrees via np.degrees
-result.angular_velocity   # (steps, 3) == y[:, 3:6]
-result.contact_force      # (steps, 3) resultant on the projectile at O1
+result.t                  # (steps,)     time
+result.x                  # (steps, 6)   configuration
+result.y                  # (steps, 6)   quasi-velocity
+result.p                  # (steps, n)   rail modal coordinates
+result.attitude           # (steps, 3)   == x[:, 3:6], degrees via np.degrees
+result.angular_velocity   # (steps, 3)   == y[:, 3:6]
+result.contact_force      # (steps, 3)   resultant on the projectile at O1
 result.contact_moment     # (steps, 3)
 ```
 
@@ -323,8 +386,9 @@ The extension points all follow the same shape: subclass, implement one method.
 (distributed mass), implement `_u_local(input_pos, output_pos, omega)` returning the
 12×12 transfer matrix *in the element's local frame*, plus the `_m_param_mat` /
 `_m_bar_param_mat` property. The base class handles orientation and the modal inner
-product. Krylov-Duncan functions and other helpers are available in
-`dynaramp.mstmm.krylov` for the exact solutions of continuous elastic systems.
+product. If your element is frequency-dependent and involves wave numbers, build it from
+`dynaramp.mstmm.krylov` rather than dividing by them — that is what keeps `omega = 0`
+finite.
 
 **A new guide cross-section** — subclass `UniformProfile` and implement
 `contacts(r_vi, radius, station)`, returning one `SurfaceContact` per penetrated face via
@@ -352,16 +416,16 @@ class Drag:
 
 ## Troubleshooting
 
-| Symptom                                              | Cause                                                                               |
-|------------------------------------------------------|-------------------------------------------------------------------------------------|
-| `RuntimeError: tree must be generated`               | `make_tree()` not called.                                                           |
-| `ValueError: under-constrained or over-constrained`  | Boundary `None` count does not match the unknowns.                                  |
-| Fewer modes than expected                            | `search_res` too coarse, or `omega_max` too low.                                    |
-| `Propagated state doesn't match root boundary state` | Usually a genuinely inconsistent topology or boundary set.                          |
-| `Non-positive modal mass`                            | The mode set is not a valid basis — often a spurious mode from too loose an `rtol`. |
-| Contact force oscillates and grows                   | `dt` too large for the contact stiffness, or the stiffness is unphysically high.    |
-| `exited=False`                                       | The projectile never left the rail: `t_max` too short, or thrust too low.           |
-| Result changes when `step` changes                   | Finite-difference step off its optimum; leave `step=None`.                          |
+| Symptom | Cause |
+|---|---|
+| `RuntimeError: tree must be generated` | `make_tree()` not called. |
+| `ValueError: under-constrained or over-constrained` | Boundary `None` count does not match the unknowns. |
+| Fewer modes than expected | `search_res` too coarse, or `omega_max` too low. |
+| `Propagated state doesn't match root boundary state` | Usually a genuinely inconsistent topology or boundary set. |
+| `Non-positive modal mass` | The mode set is not a valid basis — often a spurious mode from too loose an `rtol`. |
+| Contact force oscillates and grows | `dt` too large for the contact stiffness, or the stiffness is unphysically high. |
+| `exited=False` | The projectile never left the rail: `t_max` too short, or thrust too low. |
+| Result changes when `step` changes | Finite-difference step off its optimum; leave `step=None`. |
 
 Logging is per-module under the `dynaramp` namespace, so
 `logging.getLogger("dynaramp.simulation").setLevel(logging.INFO)` gives run progress

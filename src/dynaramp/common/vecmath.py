@@ -21,13 +21,13 @@ def skew_sym_mat(vec: VectorLike) -> Matrix:
     """
     Skew-symmetric matrix of a 3D vector.
 
-    Defined such that for any vector ``w`` the cross-product can be written as a
+    Defined such that for any vector ``w`` the cross product can be written as a
     matrix product: ``v x w = S(v) @ w``.
 
     Parameters
     ----------
     vec : VectorLike
-        A 3-vector, of shape ``(3, )`` or ``(3, 1)``.
+        A 3-vector, of shape ``(3,)`` or ``(3, 1)``.
 
     Returns
     -------
@@ -37,7 +37,7 @@ def skew_sym_mat(vec: VectorLike) -> Matrix:
     Raises
     ------
     ValueError
-        If ``vec`` is not of shape ``(3, )`` or ``(3, 1)``.
+        If ``vec`` is not of shape ``(3,)`` or ``(3, 1)``.
     """
     vec = np.asarray(vec, dtype=np.float64)
     # Verify shape
@@ -88,7 +88,7 @@ def parallel_axis(inertia: Matrix, mass: float, offset: VectorLike) -> Matrix:
     """
     Shift an inertia tensor to a new reference point (parallel-axis theorem).
 
-    ``J = I + m (|r|^2 I3 - r.r^T)``, with ``r`` the vector from the new reference
+    ``J = I + m (|r|^2 I3 - r r^T)``, with ``r`` the vector from the new reference
     point to the point the tensor is currently expressed about. The expression is a
     quadratic form in ``r``, so the sign of ``offset`` does not matter.
 
@@ -342,7 +342,7 @@ def block_rotation(dcm: Matrix) -> Matrix:
     Parameters
     ----------
     dcm : Matrix
-        The 3x3 direction-cosine matrix ``D`` (e.g., a scipy Rotation's ``as_matrix()``).
+        The 3x3 direction-cosine matrix ``D`` (e.g. a scipy Rotation's ``as_matrix()``).
 
     Returns
     -------

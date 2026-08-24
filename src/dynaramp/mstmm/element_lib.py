@@ -148,8 +148,8 @@ class RigidBody(DiscreteElement):
         super().__init__(e_id, orientation)
 
         self.mass = float(mass)
-        self.inertia: Matrix = np.asarray(inertia, dtype=np.float64)
-        self.com_pos: Vector = np.asarray(com, dtype=np.float64)
+        self.inertia = np.asarray(inertia, dtype=np.float64)
+        self.com_pos = np.asarray(com, dtype=np.float64)
         self._m_mat = spatial_mass_matrix(self.mass, self.inertia)
         self._m_mat.setflags(write=False)
 
@@ -191,7 +191,7 @@ class RigidBody(DiscreteElement):
 
 class EulerBernoulliBeam(ContinuousElement):
     """
-    A uniform Euler-Bernoulli beam with axial, torsional, and biaxial bending compliance.
+    A uniform Euler-Bernoulli beam with axial, torsional and biaxial bending compliance.
 
     Parameters
     ----------
@@ -208,16 +208,16 @@ class EulerBernoulliBeam(ContinuousElement):
     area : float
         Cross-sectional area A.
     i_y : float
-        The second moment of area about the local y-axis, governing bending in the x-z plane.
+        Second moment of area about the local y axis, governing bending in the x-z plane.
     i_z : float
-        The second moment of area about the local z-axis, governing bending in the x-y plane.
+        Second moment of area about the local z axis, governing bending in the x-y plane.
     orientation : Matrix | None
         Optional 3x3 direction-cosine matrix (local -> global).
 
     Notes
     -----
-    The transfer matrix is assembled from the *normalized* Krylov-Duncan group
-    (see :mod:`dynaramp.mstmm.krylov`), so no wave number is ever divided by. The matrix is
+    The transfer matrix is assembled from the *normalized* Krylov-Duncan group (see
+    :mod:`dynaramp.mstmm.krylov`), so no wave number is ever divided by. The matrix is
     therefore valid at ``omega = 0``, where it reduces exactly to the static transfer
     matrix of the beam, and it retains full precision at small argument, where the
     closed-form Krylov functions lose roughly eight digits to cancellation.
@@ -225,7 +225,7 @@ class EulerBernoulliBeam(ContinuousElement):
 
     # TODO: Add support for non-uniform beams (e.g. tapered, variable cross-section)
 
-    # Wave numbers depend only on frequency, so they are memoised per omega. The cap keeps
+    # Wave numbers depend only on frequency, so they are memoized per omega. The cap keeps
     # a long eigenfrequency sweep -- which visits each frequency exactly once and never
     # hits the cache -- from retaining an unbounded number of entries.
     _WAVE_CACHE_CAP = 4096
@@ -265,7 +265,7 @@ class EulerBernoulliBeam(ContinuousElement):
 
     def _wave_numbers(self, omega: float) -> Tuple[float, float, float, float]:
         """
-        The four wave numbers at a given frequency, memoised.
+        The four wave numbers at a given frequency, memoized.
 
         Parameters
         ----------
@@ -275,7 +275,7 @@ class EulerBernoulliBeam(ContinuousElement):
         Returns
         -------
         tuple of float
-            ``(beta_x, lam_y, lam_z, gam_theta_x)``: the axial, the two bending, and the
+            ``(beta_x, lam_y, lam_z, gam_theta_x)``: the axial, the two bending and the
             torsional wave numbers. All vanish at ``omega = 0``.
         """
         cached = self._wave_cache.get(omega)
@@ -327,13 +327,13 @@ class EulerBernoulliBeam(ContinuousElement):
 
         beta_x, lam_y, lam_z, gam_theta_x = self._wave_numbers(omega)
 
-        # Normalised Krylov groups for the two bending planes. Each call costs one set of
+        # Normalized Krylov groups for the two bending planes. Each call costs one set of
         # four transcendental evaluations and supplies every bending entry below; the
         # previous formulation re-derived them eighteen times per matrix.
         s_y, t1_y, u2_y, v3_y = krylov_normalized(lam_y * x)
         s_z, t1_z, u2_z, v3_z = krylov_normalized(lam_z * x)
 
-        # Axial and torsional cardinal sines, playing the same wave-number-cancelling role.
+        # Axial and torsional cardinal sines, playing the same wave-number-canceling role.
         sinc_ax = sinc(beta_x * x)
         sinc_to = sinc(gam_theta_x * x)
 

@@ -22,7 +22,7 @@ class ExternalForce(Protocol):
     """
     A non-contact load on the projectile.
 
-    Given the current projectile kinematics, the projectile properties, and the time, it
+    Given the current projectile kinematics, the projectile properties and the time, it
     returns the force and moment it applies at O1, both projected in the inertial frame
     K_I: ``(I_q_O1, I_m_O1)``.
     """
@@ -49,7 +49,7 @@ class Gravity:
     g : VectorLike
         Gravitational acceleration vector in K_I [m/s^2]. Defaults to +z, the "down"
         axis of the NED convention (+X forward, +Y right, +Z down). With the launcher
-        upright (``A_IR = I``), this seats the shoes on the rail-groove floor.
+        upright (``A_IR = I``) this seats the shoes on the rail-groove floor.
     """
     g: VectorLike = (0.0, 0.0, G0)
 

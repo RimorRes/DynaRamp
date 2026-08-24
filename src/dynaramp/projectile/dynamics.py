@@ -3,6 +3,8 @@ import logging
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from ..common.types import Vector, Matrix
 from ..common.vecmath import skew_sym_mat
 from .projectile import Projectile

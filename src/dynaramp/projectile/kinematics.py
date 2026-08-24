@@ -243,9 +243,9 @@ class ProjectileKinematics:
             r_o1=r_o1,
             r_dot_o1=r_dot_o1,
             l_to1=l_to1,
-            j_to1=np.asarray(j_to1, dtype=np.float64),
+            j_to1=j_to1,
             zeta_to1=zeta_to1,
             l_rp=l_rp,
-            j_ro1=np.asarray(j_ro1, dtype=np.float64),
+            j_ro1=j_ro1,
             zeta_ro1=zeta_ro1,
         )

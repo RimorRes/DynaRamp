@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 from collections import deque, defaultdict
-from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Sequence, Tuple, Any
+from dataclasses import dataclass, field
+from typing import Dict, FrozenSet, List, Sequence, Tuple
 
 import numpy as np
 from scipy.signal import find_peaks
@@ -60,7 +60,7 @@ class _ConstraintPlan:
         build its kinematic contribution.
     pairs : tuple
         One ``(reference_tips, other_tips)`` pair per independent constraint set. With
-        ``N`` incoming branches, there are ``N - 1`` of them.
+        ``N`` incoming branches there are ``N - 1`` of them.
     """
     tip_terms: Dict[EntityID, Tuple[_Plan, Matrix]]
     pairs: Tuple[Tuple[FrozenSet[EntityID], FrozenSet[EntityID]], ...]
@@ -73,7 +73,7 @@ class _Assembly:
 
     Rebuilt only when the topology changes. A modal search evaluates the overall transfer
     matrix at thousands of frequencies, and without this every one of them re-walked the
-    tree, re-resolved every path, and re-derived the boundary-condition masks.
+    tree, re-resolved every path and re-derived the boundary-condition masks.
 
     Attributes
     ----------
@@ -90,9 +90,9 @@ class _Assembly:
         Boundary IDs surviving the merges.
     z_merged : Vector
         Merged boundary state vector, still containing ``None`` for unknowns.
-    known_mask : Any
+    known_mask : Vector
         Boolean mask of components with a prescribed value.
-    nonzero_mask : Any
+    nonzero_mask : Vector
         Boolean mask of components with a prescribed *non-zero* value.
     z_nz : Vector
         The prescribed non-zero values themselves.
@@ -103,8 +103,8 @@ class _Assembly:
     merges: Tuple[Tuple[int, int, Matrix], ...]
     merged_boundaries: List[EntityID]
     z_merged: Vector
-    known_mask: Any
-    nonzero_mask: Any
+    known_mask: Vector
+    nonzero_mask: Vector
     z_nz: Vector
 
 
@@ -140,7 +140,6 @@ def null_space_dimension(sigma: Vector, max_dim: int = 6) -> int:
     return int(np.argmax(ratios)) + 1
 
 
-# noinspection GrazieStyle
 class System:
     """
     Solver operating on a reduced tree topology.
@@ -174,7 +173,7 @@ class System:
 
         Notes
         -----
-        Staleness is detected by the identity of the topology's ``z_all`` array, which is
+        Staleness is detected by identity of the topology's ``z_all`` array, which is
         replaced wholesale whenever the tree is regenerated.
         """
         z_all = self.topology.z_all
@@ -518,7 +517,7 @@ class System:
         Raises
         ------
         RuntimeError
-            If the sweep did not reach any element.
+            If any element was not reached by the sweep.
         ValueError
             If the propagated state does not match the root boundary condition.
         """
@@ -586,7 +585,7 @@ class System:
         # Add the root to the end of the dict
         state_vecs[topology.root.b_id] = root_sv
 
-        logger.debug(f"Successfully computed internal states at {omega:.3e} rad/s.")
+        logger.info(f"Successfully computed internal states at {omega:.3e} rad/s.")
 
         return state_vecs
 
@@ -626,7 +625,7 @@ class System:
 
         An eigenfrequency is repeated whenever the overall transfer matrix has a null
         space of dimension greater than one there, which symmetric systems produce
-        routinely. E.g., a body on springs of equal stiffness in y and z has a
+        routinely -- a body on springs of equal stiffness in y and z has a
         two-dimensional eigenspace at one frequency. Every basis vector of that
         eigenspace is a genuine, physically distinct mode, so all of them are returned.
         Taking only one would silently discard part of the system's response without any
@@ -665,7 +664,7 @@ class System:
         Notes
         -----
         The sweep covers strictly positive frequencies only. This is a modeling choice,
-        not a numerical one: the element transfer matrices are perfectly well-defined at
+        not a numerical one: the element transfer matrices are perfectly well defined at
         ``omega = 0``, where they reduce to their static form, but a root there is a
         rigid-body freedom rather than a vibration mode, and a peak sitting exactly on
         the boundary of the sweep cannot be bracketed for refinement. A system with a
@@ -700,7 +699,7 @@ class System:
             s = np.linalg.svd(self.overall_transfer_mat(refined_omega)[0], compute_uv=False)
             rcond = s[-1] / s[0]
 
-            logger.debug(f"Mode candidate at {float(refined_omega):.3e} rad/s.")
+            logger.info(f"Mode candidate at {float(refined_omega):.3e} rad/s.")
             logger.debug(f"sigma_min = {s[-1]:.6e}, sigma_max = {s[0]:.6e}, rcond = {rcond:.6e}")
             # If rcond passes the tolerance, keep every eigenvector at this frequency --
             # the null space may be more than one-dimensional (a repeated eigenfrequency).
@@ -844,11 +843,111 @@ class System:
         Vector
             The 6-component mode shape at that point.
         """
-        return self.mode_shapes_at((mode,), e_id, position)[0]
+        return self.state_at(mode.internal_states, e_id, position, mode.frequency)
+
+    def state_at(
+            self,
+            internal_states: Dict[EntityID, Vector],
+            e_id: EntityID,
+            position: Vector,
+            omega: float = 0.0,
+    ) -> Vector:
+        """
+        The kinematic state at a material point, for any propagated solution.
+
+        The same operation as :meth:`mode_shapes_at`, but for a single solution that
+        need not be a mode: a static deflection from :meth:`static_solve` is propagated
+        through exactly the same transfer matrices, at ``omega = 0``.
+
+        Parameters
+        ----------
+        internal_states : Dict[EntityID, Vector]
+            State vector at every node, as returned by :meth:`propagate_state`.
+        e_id : EntityID
+            Element the point belongs to.
+        position : Vector
+            Point coordinates in the element's local frame.
+        omega : float
+            Frequency the solution was computed at. Zero for a static solution.
+
+        Returns
+        -------
+        Vector
+            The 6-component state ``[x, y, z, theta_x, theta_y, theta_z]``, in the
+            global frame.
+        """
+        pred_id, input_pos = self.topology.main_input_of(e_id)
+        elem = self.topology.get_element(e_id)
+        u = elem.u(input_pos, np.asarray(position, dtype=np.float64), omega)
+        return (u @ internal_states[pred_id])[0:6].astype(np.float64)
+
+    def static_solve(self, rtol: float = 1e-4) -> Dict[EntityID, Vector]:
+        """
+        Solve the system at ``omega = 0`` under its prescribed boundary loads.
+
+        The exact static problem, with no modal truncation whatsoever: at zero frequency
+        every element transfer matrix reduces to its static form, so the overall transfer
+        equation *is* the stiffness relation of the structure. Loads enter through
+        non-zero prescribed boundary components -- a force or moment set on a boundary's
+        state vector -- and the solution is propagated through the tree exactly as a mode
+        would be.
+
+        Parameters
+        ----------
+        rtol : float
+            Relative tolerance for the root boundary check in :meth:`propagate_state`.
+
+        Returns
+        -------
+        Dict[EntityID, Vector]
+            The static state vector at every node of the tree. Pass it to
+            :meth:`state_at` to read the deflection at any material point.
+
+        Raises
+        ------
+        ValueError
+            If the structure has a rigid-body freedom, which makes the static problem
+            singular, or if the propagated state fails the root boundary check.
+
+        Notes
+        -----
+        This is the counterpart to
+        :func:`dynaramp.mstmm.response.static_response`, which answers the same question
+        by superposing a truncated set of modes. The two agree to within that truncation,
+        which makes running both a genuine check on the modal basis: if they disagree by
+        more than a fraction of a percent, the retained modes are not spanning the
+        response.
+
+        Only boundary loads can be applied this way. A load at an interior point has to
+        go through the modal route, or through a topology that puts a boundary there.
+        """
+        u_red, f, z_merged, rem_bounds = self.overall_transfer_mat(0.0)
+
+        if not np.any(f):
+            logger.warning(
+                "Static solve with no prescribed non-zero boundary load: the solution "
+                "is trivially zero. Set a force or moment component on a boundary's "
+                "state vector to load the structure."
+            )
+
+        sigma = np.linalg.svd(u_red, compute_uv=False)
+        if sigma[-1] <= 1e-12 * sigma[0]:
+            err_msg = (
+                "The static problem is singular: the structure has a rigid-body freedom "
+                "and no static equilibrium. Constrain it, or use a transient analysis."
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        z_red = np.linalg.solve(u_red, f)
+        return dict(self.propagate_state(
+            omega=0.0, z_red=z_red, z_merged=z_merged,
+            rem_boundary_ids=rem_bounds, rtol=rtol,
+        ))
 
     def _element_extent(self, e_id: EntityID) -> Tuple[Vector, Vector]:
         """
-        The pair of positions spanning an element, to integrate its mass.
+        The pair of positions spanning an element, for the purpose of integrating its mass.
 
         Parameters
         ----------
@@ -923,7 +1022,7 @@ class System:
             rayleigh: Tuple[float, float] | None = None,
     ) -> Tuple[Matrix, Matrix] | Tuple[Matrix, Matrix, Matrix]:
         """
-        The diagonal modal mass, stiffness, and (optionally) damping matrices.
+        The diagonal modal mass, stiffness and (optionally) damping matrices.
 
         Parameters
         ----------

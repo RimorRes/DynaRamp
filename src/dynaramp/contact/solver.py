@@ -78,8 +78,11 @@ class ContactSolver:
     ----------
     field : GuideModalField
         The guide modal field.
-    profile : GuideProfile
-        The guide cross-section contact model.
+    profile : GuideProfile | Sequence[GuideProfile]
+        The guide cross-section contact model. A single profile applies to every slider.
+        A sequence assigns one per slider, which is what a guide with more than one
+        groove needs: each slider rides its own, related to the cross-section origin by
+        its own datum (see :class:`dynaramp.contact.profile.OffsetProfile`).
     sliders : Sequence[Slider]
         The projectile's sliders, in order.
     a_ir : Matrix | None
@@ -100,22 +103,32 @@ class ContactSolver:
     Raises
     ------
     ValueError
-        If ``l_c`` is a sequence whose length does not match the slider count.
+        If ``l_c`` or ``profile`` is a sequence whose length does not match the slider
+        count.
     """
 
     def __init__(
             self,
             field: GuideModalField,
-            profile: GuideProfile,
+            profile: GuideProfile | Sequence[GuideProfile],
             sliders: Sequence[Slider],
             a_ir: Matrix | None = None,
             l_c: float | Sequence[float] = np.inf,
             station_bracket: float = 0.5,
     ):
         self.field = field
-        self.profile = profile
         self.sliders: List[Slider] = list(sliders)
-        self.a_ir: Matrix = field.a_ir if a_ir is None else a_ir
+
+        if isinstance(profile, GuideProfile):
+            self.profiles: List[GuideProfile] = [profile] * len(self.sliders)
+        else:
+            self.profiles = list(profile)
+            if len(self.profiles) != len(self.sliders):
+                raise ValueError(
+                    f"profile has {len(self.profiles)} entries but there are "
+                    f"{len(self.sliders)} sliders."
+                )
+        self.a_ir = np.asarray(field.a_ir if a_ir is None else a_ir, dtype=np.float64)
         self.station_bracket = float(station_bracket)
 
         if isinstance(l_c, (int, float)):
@@ -167,7 +180,7 @@ class ContactSolver:
         for idx, slider in enumerate(self.sliders):
             prev = memory.get(idx, {})
             sc = evaluate_slider(
-                kin, self.field, self.a_ir, p, p_dot, slider, self.profile,
+                kin, self.field, self.a_ir, p, p_dot, slider, self.profiles[idx],
                 x_r=x_r, l_c=self.exit_stations[idx], impact_velocities=prev,
                 station_bracket=self.station_bracket,
             )

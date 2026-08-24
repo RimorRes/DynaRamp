@@ -6,7 +6,7 @@ from .contact_model import (
 )
 from .profile import (
     SurfaceContact, GuideProfile, UniformProfile,
-    RailProfile, CanisterProfile, StationVaryingProfile,
+    RailProfile, CanisterProfile, OffsetProfile, StationVaryingProfile,
 )
 from .detection import SliderContact, contact_station, evaluate_slider
 from .solver import ContactSolver, ContactResult, ContactMemory, GuideReaction
@@ -21,6 +21,7 @@ __all__ = [
     "UniformProfile",
     "RailProfile",
     "CanisterProfile",
+    "OffsetProfile",
     "StationVaryingProfile",
     "SliderContact",
     "contact_station",

@@ -12,31 +12,32 @@ Theory
 ------
 The body dynamics equation of an undamped multi-rigid-flexible system is
 
-    M v_tt + K v = f (Rui 3.90)
+    M v_tt + K v = f                                            (Rui 3.90)
 
-Where ``v`` collects the physical coordinates of every body and beam in the
+where ``v`` collects the physical coordinates of every body and beam in the
 system and ``M``, ``K`` are the augmented mass and stiffness *operators*. The
 physical response is expanded on the augmented eigenvectors ``V^k``:
 
-    v = sum_k V^k q_k(t) (Rui 3.91)
+    v = sum_k V^k q_k(t)                                        (Rui 3.91)
 
-The augmented eigenvectors are orthogonal with respect to both operators.
+The augmented eigenvectors are orthogonal with respect to both operators,
 
-    <M V^k, V^p> = delta_kp M_p, <K V^k, V^p> = delta_kp K_p (Rui 3.93)
+    <M V^k, V^p> = delta_kp M_p ,  <K V^k, V^p> = delta_kp K_p  (Rui 3.93)
 
-So substituting the expansion and taking the inner product with ``V^p``
+so substituting the expansion and taking the inner product with ``V^p``
 decouples the system into one scalar oscillator per mode:
 
-    q_p_tt + omega_p^2 q_p = <f, V^p> / M_p (Rui 3.94)
+    q_p_tt + omega_p^2 q_p = <f, V^p> / M_p                     (Rui 3.94)
 
 The modal force ``<f, V^p>`` of a point load is just its virtual work on the
 mode shape: ``F . X^p(point) + T . Theta^p(point)``. Each oscillator is then
 integrated independently and the physical motion recovered from (3.91).
 
-The augmented eigenvectors are a set of "natural shapes" the structure can hold.
-Any motion is a weighted blend of those shapes, and orthogonality guarantees
-that "pushing" on one shape never spills energy into another -- so a system with
-hundreds of degrees of freedom becomes a handful of independent mass-spring oscillators.
+The analogy worth holding onto: the augmented eigenvectors are a set of
+"natural postures" the structure can hold. Any motion is a weighted blend of
+those postures, and orthogonality guarantees that pushing on one posture never
+spills energy into another -- so a system with hundreds of degrees of freedom
+becomes a handful of independent mass-spring oscillators.
 
 Degenerate (repeated) eigenfrequencies
 --------------------------------------
@@ -45,9 +46,9 @@ stiffness in y and z has a two-dimensional eigenspace at a single frequency.
 :meth:`System.natural_modes` already returns every eigenvector at such a frequency,
 so the basis is complete before this module sees it.
 
-Because nothing else requires it, it does not make the vectors *within* a
+What it does not do, because nothing else needs it, is make the vectors *within* a
 repeated cluster orthogonal to each other in the augmented inner product. The SVD
-hands back a basis that is orthonormal in R^n, which is a different thing and does
+hands back a basis that is orthonormal in R^n, which is not the same thing and does
 not satisfy (3.93). :func:`augmented_modes` supplies that step, and it is what makes
 the modal equations actually decouple.
 
@@ -67,7 +68,7 @@ Rayleigh damping in the package and is shared with
 Rigid-body modes
 ----------------
 A mode at ``omega = 0`` is a rigid-body freedom: it has no restoring force, so it
-does not oscillate about a static offset. The oscillator solution
+does not oscillate about a static offset -- it accelerates. The oscillator solution
 degenerates accordingly, and :func:`transient_response` integrates that case in its
 own closed form rather than dividing by a zero stiffness.
 
@@ -77,19 +78,19 @@ The pieces this module builds on are all plain :class:`System` operations, and s
 there so that an eigenvalue analysis can use them without pulling in the response
 machinery:
 
-    ``System.mode_shape`` a mode's shape at any material point
-    ``System.modal_product`` the augmented inner product <M V^k, V^p>
-    ``System.calc_system_modal_masses`` its diagonal, the modal masses
-    ``System.eigenvectors_at`` every eigenvector at a known frequency
+    ``System.mode_shape``                a mode's shape at any material point
+    ``System.modal_product``             the augmented inner product <M V^k, V^p>
+    ``System.calc_system_modal_masses``  its diagonal, the modal masses
+    ``System.eigenvectors_at``           every eigenvector at a known frequency
 
-This module adds the orthogonalization, the load projection, and the time integration.
+This module adds the orthogonalization, the load projection and the time integration.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Sequence, Tuple, cast
+from typing import Callable, Dict, List, Sequence, Tuple
 
 import numpy as np
 from scipy import integrate
@@ -103,8 +104,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PointLoad",
     "ModalBasis",
+    "StaticResponse",
     "TransientResponse",
     "augmented_modes",
+    "static_response",
     "transient_response",
 ]
 
@@ -134,7 +137,6 @@ def _combine(modes: Sequence[Mode], weights: Sequence[float]) -> Mode:
         k: sum(w * m.internal_states[k] for w, m in zip(weights, modes))
         for k in keys
     }
-    states = cast(Dict[str, Vector], states)
     return Mode(frequency=modes[0].frequency, internal_states=states)
 
 
@@ -153,12 +155,24 @@ def _m_orthogonalize(system: System, modes: List[Mode], tol: float = 1e-10) -> L
     modes : List[Mode]
         Modes sharing one eigenfrequency.
     tol : float
-        Relative tolerance below which a vector is treated as dependent.
+        Tolerance on the *ratio* of a deflated vector's modal mass to its original one,
+        below which it is treated as linearly dependent.
 
     Returns
     -------
     List[Mode]
         The surviving, mutually orthogonal modes.
+
+    Notes
+    -----
+    The dependence test is purely relative, and has to be. Eigenvectors arrive here
+    normalized in R^n by the SVD, which fixes the scale of the *state vectors*, not of
+    the modal masses -- those follow from the system's physical inertia and its
+    geometry, and for a slender structure they land many orders of magnitude below one.
+    Comparing a deflated norm against an absolute floor therefore does not test
+    dependence at all; it tests whether the structure happens to be stiff and light, and
+    discards every repeated mode of anything that is. A degenerate pair would vanish in
+    silence, leaving a basis that is missing half of an eigenspace.
     """
     if len(modes) <= 1:
         return modes
@@ -166,7 +180,7 @@ def _m_orthogonalize(system: System, modes: List[Mode], tol: float = 1e-10) -> L
     orthogonal: List[Mode] = []
     norms: List[float] = []
     for candidate in modes:
-        # The candidate's own norm is a fixed reference for the dependence test and does
+        # The candidate's own norm is a fixed reference for the dependence test, and does
         # not change as the candidate is deflated. Computing it once avoids a second full
         # integration over every element per candidate.
         reference = system.modal_product(candidate, candidate)
@@ -176,10 +190,12 @@ def _m_orthogonalize(system: System, modes: List[Mode], tol: float = 1e-10) -> L
             if abs(coeff) > 0.0:
                 current = _combine([current, basis_mode], [1.0, -coeff])
         norm = system.modal_product(current, current)
-        if norm <= tol * max(reference, 1.0):
+        if reference <= 0.0 or norm <= tol * reference:
             logger.debug(
                 f"Dropping a linearly dependent / inertia-free direction at "
-                f"{candidate.frequency:.6e} rad/s (modal mass {norm:.3e})."
+                f"{candidate.frequency:.6e} rad/s (modal mass {norm:.3e}, "
+                f"{norm / reference if reference > 0 else float('nan'):.3e} of its "
+                f"undeflated value)."
             )
             continue
         orthogonal.append(current)
@@ -203,7 +219,7 @@ def augmented_modes(
     ``System.natural_modes`` already returns every eigenvector at a repeated
     eigenfrequency; what it does not do -- because it has no reason to -- is make the
     vectors within a repeated cluster orthogonal to each other in the augmented inner
-    product. The SVD hands back a basis that is orthonormal in R^n, which is a different
+    product. The SVD hands back a basis that is orthonormal in R^n, which is not the same
     thing and does not satisfy (3.93). This function supplies that last step, which is
     what makes the modal equations actually decouple.
 
@@ -328,7 +344,7 @@ class ModalBasis:
     """
     A set of augmented eigenvectors plus everything needed to use them.
 
-    Projects load onto the modes and rebuild physical motion from them.
+    Projects loads onto the modes and rebuilds physical motion from them.
 
     Attributes
     ----------
@@ -350,7 +366,7 @@ class ModalBasis:
         self.frequencies = np.array([m.frequency for m in self.modes], dtype=np.float64)
         self.modal_masses = self.system.calc_system_modal_masses(self.modes)
         # Mode shapes at a fixed material point do not change with time, but a load
-        # projection asks for them at every step of an integration. They are memoised
+        # projection asks for them at every step of an integration. They are memoized
         # per (element, position) rather than recomputed.
         self._shape_cache: Dict[Tuple[EntityID, bytes], Matrix] = {}
         if np.any(self.modal_masses <= 0.0):
@@ -510,6 +526,118 @@ class ModalBasis:
             # Taken directly, so a rigid-body mode keeps its mass-proportional damping.
             return rayleigh_modal_damping(self.frequencies, *rayleigh)
         return 2.0 * self.damping_ratios(zeta=zeta) * self.frequencies
+
+
+# --------------------------------------------------------------------------------------
+# Static response
+# --------------------------------------------------------------------------------------
+
+@dataclass
+class StaticResponse:
+    """
+    The equilibrium response of the system to a set of time-invariant loads.
+
+    Attributes
+    ----------
+    basis : ModalBasis
+        The modal basis used.
+    q : Vector
+        Generalized coordinates at equilibrium, shape ``(n_modes,)``.
+    """
+    basis: ModalBasis
+    q: Vector
+
+    def displacement(self, e_id: EntityID, position: VectorLike) -> Vector:
+        """
+        Static deflection at a material point: ``v = sum_p V^p q_p``.
+
+        Parameters
+        ----------
+        e_id : EntityID
+            Element the point belongs to.
+        position : VectorLike
+            Point coordinates in the element's local frame.
+
+        Returns
+        -------
+        Vector
+            The 6 components ``[x, y, z, theta_x, theta_y, theta_z]``.
+        """
+        return self.q @ self.basis.shape_at(e_id, position)
+
+
+def static_response(
+        basis: ModalBasis,
+        loads: Sequence[PointLoad],
+        tol: float = 1e-8,
+) -> StaticResponse:
+    """
+    Equilibrium response to time-invariant loads, by modal superposition.
+
+    Setting every time derivative in (3.94) to zero leaves ``omega_p^2 q_p = f_p / M_p``,
+    so each mode simply takes the static offset its share of the load produces. This is
+    the ``t -> infinity`` limit of :func:`transient_response` under a constant load, and
+    the cheapest useful thing the modal basis can be asked for.
+
+    Parameters
+    ----------
+    basis : ModalBasis
+        The modal basis to project onto.
+    loads : Sequence[PointLoad]
+        The applied loads. Any time dependence is evaluated at ``t = 0``.
+    tol : float
+        Relative tolerance for deciding that a load does not excite a rigid-body mode.
+
+    Returns
+    -------
+    StaticResponse
+        The equilibrium response.
+
+    Raises
+    ------
+    ValueError
+        If the load excites a rigid-body mode, which has no equilibrium.
+
+    Notes
+    -----
+    Accurate only to the extent that the retained modes span the response. Unlike a
+    dynamic analysis -- where the truncated high modes are genuinely far from resonance
+    and contribute little -- a *static* deflection draws on every mode, and truncation
+    always under-predicts it. Comparing against
+    :meth:`dynaramp.mstmm.system.System.static_solve`, which is exact, is the way to
+    find out whether the basis is large enough.
+
+    A rigid-body mode (``omega = 0``) has no restoring force, so it has no equilibrium
+    unless the load happens not to excite it. That case is an error rather than a
+    silent infinity; a load in equilibrium leaves the mode's coordinate indeterminate,
+    and zero is returned for it.
+    """
+    omega = basis.frequencies
+    f_p = basis.modal_forces(loads, 0.0)
+    q = np.zeros(basis.n_modes, dtype=np.float64)
+
+    elastic = omega > 0.0
+    q[elastic] = f_p[elastic] / (basis.modal_masses[elastic] * omega[elastic] ** 2)
+
+    rigid = ~elastic
+    if np.any(rigid):
+        scale = float(np.max(np.abs(f_p))) if f_p.size else 0.0
+        unbalanced = np.abs(f_p[rigid]) > tol * max(scale, 1.0)
+        if np.any(unbalanced):
+            err_msg = (
+                f"The applied load excites {int(np.count_nonzero(unbalanced))} "
+                f"rigid-body mode(s), which have no static equilibrium. The structure "
+                f"would accelerate; use `transient_response` instead."
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+        logger.debug(
+            "Load is in equilibrium with respect to %d rigid-body mode(s); their "
+            "generalized coordinates are indeterminate and reported as zero.",
+            int(np.count_nonzero(rigid)),
+        )
+
+    return StaticResponse(basis=basis, q=q)
 
 
 # --------------------------------------------------------------------------------------

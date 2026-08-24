@@ -1,5 +1,5 @@
 """
-Modal-mechanics helpers shared by the structural, contact, and simulation layers.
+Modal-mechanics helpers shared by the structural, contact and simulation layers.
 
 Both quantities defined here were previously spelled out several times across the
 package, in mutually inconsistent parameterizations. Keeping one definition of each
@@ -24,7 +24,7 @@ def project_wrench(shapes: Matrix, wrench: VectorLike) -> Vector:
     Project a generalized load onto a set of mode shapes: ``f_p = <f, V^p>``.
 
     The inner product of a point load with a mode is its virtual work on that mode
-    shape, ``F . X^p + T . Theta^p``. Written with the shapes stacked as rows, this is
+    shape, ``F . X^p + T . Theta^p``. Written with the shapes stacked as rows this is
     a single matrix-vector product.
 
     Parameters

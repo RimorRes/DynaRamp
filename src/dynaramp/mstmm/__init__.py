@@ -6,7 +6,8 @@ from .element_lib import (
 from .system import System, Mode, null_space_dimension
 from .topology import TopologyHandler, ElementInfo, PortInfo, PropagationStep, TipInfo
 from .response import (
-    PointLoad, ModalBasis, TransientResponse, augmented_modes, transient_response,
+    PointLoad, ModalBasis, StaticResponse, TransientResponse,
+    augmented_modes, static_response, transient_response,
 )
 
 __all__ = [
@@ -21,6 +22,6 @@ __all__ = [
     # topology
     "TopologyHandler", "ElementInfo", "PortInfo", "PropagationStep", "TipInfo",
     # response
-    "PointLoad", "ModalBasis", "TransientResponse",
-    "augmented_modes", "transient_response",
+    "PointLoad", "ModalBasis", "StaticResponse", "TransientResponse",
+    "augmented_modes", "static_response", "transient_response",
 ]

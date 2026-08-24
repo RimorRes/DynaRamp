@@ -103,12 +103,8 @@ class Element(ABC):
         self._axis_aligned: bool = bool(np.array_equal(self.orientation, I3))
         # 12x12 state-vector rotation and its 6x6 kinematic sub-block, both frame
         # constants. Only built when they are actually needed.
-        if not self._axis_aligned:
-            self._h_rot = block_rotation(self.orientation)
-            self._rot6 = self._h_rot[0:6, 0:6]
-        else:
-            self._h_rot = None
-            self._rot6 = None
+        self._h_rot: Matrix | None = None if self._axis_aligned else block_rotation(self.orientation)
+        self._rot6: Matrix | None = None if self._axis_aligned else self._h_rot[0:6, 0:6]
 
         # Caches for the frequency-independent geometric transforms. Both are keyed by
         # port geometry, of which an element has only a handful, so they are self-limiting.
@@ -126,7 +122,7 @@ class Element(ABC):
 
             ``U_global = H @ U_local @ H^T``,  ``H = blkdiag(D, D, D, D)``
 
-        Where ``D = self.orientation``. For the default identity orientation this
+        where ``D = self.orientation``. For the default identity orientation this
         reduces to ``U_local`` exactly, and the rotation is skipped entirely.
 
         Parameters
@@ -147,7 +143,6 @@ class Element(ABC):
         if self._axis_aligned:
             return u_local
         h = self._h_rot
-        assert h is not None
         return h @ u_local @ h.T
 
     @abstractmethod
@@ -173,14 +168,13 @@ class Element(ABC):
             The 12x12 transfer matrix in the local frame.
         """
 
-    # noinspection DuplicatedCode
     def u_extract(self, input_pos: VectorLike, output_pos: VectorLike) -> Matrix:
         """
         Transfer matrix for an auxiliary (non-main) input port.
 
         An auxiliary input contributes no kinematics of its own: it only carries the
         wrench arriving there across to the output, picking up the lever-arm moment.
-        The result is therefore the static lever transformation in the force/moment quadrant
+        The result is therefore the static lever transform in the force/moment quadrant
         and zero elsewhere.
 
         Parameters
@@ -213,7 +207,6 @@ class Element(ABC):
         self._u_extract_cache[signature] = _freeze(u_extract)
         return u_extract
 
-    # noinspection DuplicatedCode
     def h(self, ref_pos: VectorLike, input_pos: VectorLike) -> Matrix:
         """
         Geometric incidence matrix mapping a full state vector to a kinematic state.
@@ -336,7 +329,6 @@ class Element(ABC):
         propagated = (u_mat @ states)[0:6]
         if self._axis_aligned:
             return propagated
-        assert self._rot6 is not None
         return self._rot6.T @ propagated
 
 
@@ -449,11 +441,11 @@ class ContinuousElement(Element, ABC):
         Notes
         -----
         Evaluated with fixed-order Gauss-Legendre quadrature rather than an adaptive
-        rule. The integrand is a product of two mode shapes -- analytic and smooth on
+        rule. The integrand is a product of two mode shapes -- analytic, and smooth on
         the span -- which is precisely the case where Gauss-Legendre converges
         spectrally, so a fixed order reaches machine precision at a predictable cost.
         An adaptive rule spends most of its budget on error estimation for an integrand
-        that never needed it and makes the cost of a modal analysis data-dependent.
+        that never needed it, and makes the cost of a modal analysis data-dependent.
         """
         input_pos_arr = np.asarray(input_pos, dtype=np.float64)
         output_pos_arr = np.asarray(output_pos, dtype=np.float64)
@@ -506,7 +498,7 @@ class MasslessMixin:
 @dataclass
 class Boundary:
     """
-    A boundary of the system, carrying its partially known state vector.
+    A boundary of the system, carrying its partially-known state vector.
 
     Attributes
     ----------
@@ -530,7 +522,7 @@ class CutPoint:
     b_id1, b_id2 : EntityID
         The two virtual boundaries produced by the cut.
     sign_mat_flag : bool
-        Whether the wrench half of the state vector changes its sign across the cut. True
+        Whether the wrench half of the state vector changes sign across the cut. True
         when the cut produced two input tips facing each other (action and reaction);
         False when it produced a matched output/input pair, whose states are equal.
     mat : Matrix
