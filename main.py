@@ -96,7 +96,7 @@ for t_val, vals in enumerate(nnr_solver(
         f_int_func=Sys.internal_forces,
         f_ext_func=Sys.external_forces,
         init_state=(q0, q_dot0),
-        t_stop=1.0,
+        t_stop=0.8,
         dt=t_step,
         conv_err=1e-5,
 )):
@@ -115,7 +115,7 @@ for t_val, vals in enumerate(nnr_solver(
               f"∆w(L)={(w-w0)*1e3:.3f} mm  shoes={active_shoe_count}")
 
     if active_shoe_count == 0 and not ffa:
-        print("Free flight!")
+        print(f"Free flight! t={current_time} s")
         exit_theta = np.degrees(float(q_arr[-1][2]))
         exit_theta_dot = np.degrees(float(q_dot_arr[-1][2]))
         exit_vel = q_dot_arr[-1][0]
@@ -170,11 +170,12 @@ xs = np.array([shoe.dk for shoe in Rocket.shoes])*np.cos(theta[0]) + s[0]
 ys = np.array([shoe.dk for shoe in Rocket.shoes])*np.sin(theta[0]) + y[0]
 com_point = ax.scatter(s[0], y[0], c='black', label="Center of mass")
 points = ax.scatter(xs, ys, c='orange', label="Lugs")
-trail = ax.scatter(s[0], y[0], s=2, c='gray')
+trail = ax.scatter(s[0], y[0], s=1, c='gray')
 
 leg = ax.legend()
 
-def update(frame):
+def update(frame_index):
+    frame = frame_index * 50
     w = np.array([Rail.displacement(xi, etas[frame]) for xi in x_val])
     trail_data = np.stack([s[:frame:2], y[:frame:2]]).T
 
@@ -206,6 +207,6 @@ def update(frame):
     leg.get_texts()[0].set_text(lab)
     return mesh_container[0],
 
-ani = animation.FuncAnimation(fig, update, frames=len(t_arr), interval=5)
+ani = animation.FuncAnimation(fig, update, frames=len(t_arr)//50, interval=5)
 
 plt.show()
