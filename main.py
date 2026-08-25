@@ -120,6 +120,7 @@ for t_val, vals in enumerate(nnr_solver(
         exit_theta_dot = np.degrees(float(q_dot_arr[-1][2]))
         exit_vel = q_dot_arr[-1][0]
         ffa = True
+        break
 
 print(f"Final state: theta={exit_theta:.3f}°  theta_dot={exit_theta_dot:.3f}°/s, v={exit_vel:.3f}m/s")
 
@@ -127,6 +128,29 @@ print(f"Final state: theta={exit_theta:.3f}°  theta_dot={exit_theta_dot:.3f}°/
 t_arr = np.array(t_arr)
 q_arr = np.array(q_arr)
 q_dot_arr = np.array(q_dot_arr)
+
+# Plot s, pitch, and pitch_rate versus time.
+fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+fig.suptitle("Time history", fontsize=14, fontweight="bold")
+
+s = q_arr[:, 0]
+pitch = q_arr[:, 2]
+pitch_rate = q_dot_arr[:, 2]
+
+axes[0].plot(t_arr, s, color="C0", linewidth=2)
+axes[0].set_ylabel("s (m)")
+axes[0].grid(True)
+
+axes[1].plot(t_arr, np.degrees(pitch), color="C1", linewidth=2)
+axes[1].set_ylabel("pitch (deg)")
+axes[1].grid(True)
+
+axes[2].plot(t_arr, np.degrees(pitch_rate), color="C2", linewidth=2)
+axes[2].set_xlabel("Time (s)")
+axes[2].set_ylabel("pitch_rate (deg/s)")
+axes[2].grid(True)
+
+plt.tight_layout()
 
 # Plotting and Animating beam
 fig, ax = plt.subplots()
