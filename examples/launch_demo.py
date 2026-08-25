@@ -123,7 +123,7 @@ def main() -> None:
     # and the roll channel stays identically zero for the whole run. Lifting them clear
     # of the axis fixes both. It also makes the rocket a pendulum: the center of mass now
     # hangs below its supports, so gravity rights it instead of toppling it.
-    mass = 2419.6
+    mass = 2468.1
     r = 22 * 25.4e-3 / 2                         # body radius [m]
     h_rocket = 439 * 25.4e-3
     shoe_standoff = r + 45e-3                  # shoe center, one bracket clear of the skin
